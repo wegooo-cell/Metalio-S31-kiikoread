@@ -47,6 +47,7 @@
 #include "usb_storage.h"
 #include "app_font_context.h"
 #include "ui_kit.h"
+#include "ui_font.h"
 #include "vcom_setup.h"
 
 static const char* TAG = "read_pico";
@@ -66,8 +67,6 @@ static void restore_time_from_pmu(void) {
     if (settimeofday(&tv, NULL) == 0) ESP_LOGI(TAG, "system clock restored from PMU");
 }
 
-extern const uint8_t loading_4bpp_bin_start[] asm("_binary_loading_4bpp_bin_start");
-extern const uint8_t loading_4bpp_bin_end[] asm("_binary_loading_4bpp_bin_end");
 
 // 已标定则开机读一次喂给 epdiy。未标定先用板级默认出开机图，随后拦住进标定页。
 // Load VCOM once when set. Otherwise keep the board default for the splash,
@@ -85,17 +84,39 @@ static bool resolve_vcom_at_boot(void) {
     return false;
 }
 
-// 冷启动图仍校验面板尺寸；锁屏由当前样式绘制，不再链接未使用的旧锁图。
-// Validate the cold splash against the panel; selected styles render locks without linking obsolete unused art.
-static bool images_match_panel(void) {
-    size_t loading_size = (size_t)(loading_4bpp_bin_end - loading_4bpp_bin_start);
-    size_t expected = (size_t)epd_width() * epd_height() / 2;
-    if (loading_size == expected) return true;
-    ESP_LOGE(
-        TAG, "Image size mismatch: loading %u expected %u",
-        (unsigned)loading_size, (unsigned)expected
-    );
-    return false;
+// 极简启动画面直接借内建字形绘制，不读TF、不借阅读字体、不保存整屏位图。
+// Draw the minimal cold splash with built-in glyphs, without TF access, reader faces or a full-screen asset.
+static void draw_startup_frame(uint8_t *framebuffer) {
+    ui_clear_page(framebuffer);
+    const int cx = epd_rotated_display_width() / 2;
+    const int cy = epd_rotated_display_height() / 2;
+    static const char *const wordmark[] = {"K", "i", "i", "k", "o", "r", "e", "a", "d"};
+    static const char *const caption[] = {"准", "备", "资", "源"};
+    const struct {
+        const char *text;
+        const char *const *letters;
+        int count, px, tracking, gray, center_y;
+    } lines[] = {
+        {"Kiikoread", wordmark, 9, 72, 2, 0, cy - 50},
+        {"准备资源", caption, 4, 24, 8, 7, cy + 20},
+    };
+    // 以实际字宽居中，疏朗品牌字距与浅灰提示形成层次，不引入新的字体或位图。
+    // Center measured advances; tracked branding and a muted caption add hierarchy without new fonts or bitmaps.
+    for (size_t row = 0; row < sizeof(lines) / sizeof(lines[0]); ++row) {
+        int above = 0, below = 0;
+        ui_font_measure_line_px(lines[row].px, lines[row].text, &above, &below);
+        int width = (lines[row].count - 1) * lines[row].tracking;
+        for (int i = 0; i < lines[row].count; ++i)
+            width += ui_font_text_width_px(lines[row].px, lines[row].letters[i]);
+        int x = cx - width / 2;
+        const int baseline = lines[row].center_y + (above - below) / 2;
+        for (int i = 0; i < lines[row].count; ++i) {
+            ui_font_draw_text_px(framebuffer, x, baseline, lines[row].px,
+                                lines[row].letters[i], EPD_DRAW_ALIGN_LEFT,
+                                lines[row].gray, 15, false);
+            x += ui_font_text_width_px(lines[row].px, lines[row].letters[i]) + lines[row].tracking;
+        }
+    }
 }
 
 // 深睡保持面板上原锁屏；挂卡与参考帧恢复由锁屏输入循环继续，不能用圆锁覆盖。
@@ -107,7 +128,7 @@ static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,b
     epd_clear();
     epd_hl_set_all_white(hl);
     if(resuming)ui_lock_fallback_draw(framebuffer);
-    else ui_draw_full_image(framebuffer,loading_4bpp_bin_start);
+    else draw_startup_frame(framebuffer);
     update_display_from_white(hl);
     return false;
 }
@@ -136,7 +157,6 @@ void app_main(void) {
     pmu_selftest_bind(hw.sensor);
     app_sleep_bind(hw.touch, hw.sensor);
 
-    if (!images_match_panel()) return;
 
     EpdiyHighlevelState hl = hw.hl;
     uint8_t* framebuffer = hw.framebuffer;

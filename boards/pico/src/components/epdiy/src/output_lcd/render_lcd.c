@@ -30,8 +30,7 @@
 void epd_apply_line_mask_VE(uint8_t* line, const uint8_t* mask, int mask_len);
 
 __attribute__((optimize("O3"))) static bool IRAM_ATTR
-retrieve_line_isr(void* payload, uint8_t* buf) {
-    RenderContext_t* ctx = payload;
+retrieve_line_isr(RenderContext_t* ctx, uint8_t* buf) {
     if (ctx->lines_consumed >= ctx->lines_total) {
         return false;
     }
@@ -60,8 +59,7 @@ retrieve_line_isr(void* payload, uint8_t* buf) {
 }
 
 /// start the next frame in the current update cycle
-static void IRAM_ATTR handle_lcd_frame_done(void* payload) {
-    RenderContext_t* ctx = payload;
+static void IRAM_ATTR handle_lcd_frame_done(RenderContext_t* ctx) {
     epd_lcd_frame_done_cb(NULL, NULL);
     epd_lcd_line_source_cb(NULL, NULL);
 
@@ -81,7 +79,7 @@ void lcd_do_update(RenderContext_t* ctx) {
     epd_set_mode(1);
 
     for (uint8_t k = 0; k < ctx->cycle_frames; k++) {
-        epd_lcd_frame_done_cb(handle_lcd_frame_done, ctx);
+        epd_lcd_frame_done_cb((frame_done_func_t)handle_lcd_frame_done, ctx);
         prepare_context_for_next_frame(ctx);
 
         // start both feeder tasks
@@ -117,8 +115,7 @@ void lcd_do_update(RenderContext_t* ctx) {
 }
 
 __attribute__((optimize("O3"))) static bool IRAM_ATTR
-push_pixels_isr(void* payload, uint8_t* buf) {
-    RenderContext_t* ctx = payload;
+push_pixels_isr(RenderContext_t* ctx, uint8_t* buf) {
     // Output no-op outside of drawn area
     if (ctx->lines_consumed < ctx->area.y) {
         memset(buf, 0, ctx->display_width / 4);
@@ -176,8 +173,8 @@ void epd_push_pixels_lcd(RenderContext_t* ctx, short time, int color) {
     assert(ctx->static_line_buffer != NULL);
 
     push_pixels_populate_line(ctx, color);
-    epd_lcd_frame_done_cb(handle_lcd_frame_done, ctx);
-    epd_lcd_line_source_cb(&push_pixels_isr, ctx);
+    epd_lcd_frame_done_cb((frame_done_func_t)handle_lcd_frame_done, ctx);
+    epd_lcd_line_source_cb((line_cb_func_t)&push_pixels_isr, ctx);
 
     epd_set_mode(1);
     epd_lcd_start_frame();
@@ -234,7 +231,7 @@ lcd_calculate_frame(RenderContext_t* ctx, int thread_id) {
         // queue is sufficiently filled to fill both bounce buffers, frame
         // can begin
         if (l - min_y == trigger_line) {
-            epd_lcd_line_source_cb(&retrieve_line_isr, ctx);
+            epd_lcd_line_source_cb((line_cb_func_t)&retrieve_line_isr, ctx);
             epd_lcd_start_frame();
         }
 
