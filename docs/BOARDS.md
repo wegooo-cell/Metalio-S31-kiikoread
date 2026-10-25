@@ -255,19 +255,22 @@ build/boards/
 
 ## CMake 选择层
 
-构建器将 `-DKIIKO_BOARD=pico|metalio47`、对应 `IDF_TARGET`、sdkconfig 和依赖锁文件交给各自的 ESP-IDF。生产源码中的条件分支由真实 C 编译器处理。请用上面的构建器隔离依赖锁和 SDK 缓存；不要在维护源码根目录轮换两个 SDK 并共用根 sdkconfig。板型和目标冲突、未知板型会在配置阶段报错。已有 CI 的默认板型仍为 Pico。
+构建器将 `-DKIIKO_BOARD=pico|metalio47`、对应 `IDF_TARGET`、sdkconfig 和依赖锁文件交给各自的 ESP-IDF。生产源码中的条件分支由真实 C 编译器处理。请用上面的构建器隔离依赖锁和 SDK 缓存；不要在维护源码根目录轮换两个 SDK 并共用根 sdkconfig。板型和目标冲突、未知板型会在配置阶段报错。
+
+CI 对两块板各跑一轮构建和宿主测试（`matrix.board: [pico, metalio47]`），`tools/board_layer_host_test.py` 校验 board.json、板级 sdkconfig、分区表、CI 矩阵与本文档互相对得上。板级配置、分区表和依赖锁只保留在 `boards/<设备>/`；仓库根不再有 `sdkconfig.defaults`、`sdkconfig.ci` 或 `partitions*.csv` 副本。
 
 ## 交付与验证
 
 打包前校验应用内部芯片 ID、项目名、版本、分区表及两个 OTA 槽的容量，同时校验 bootloader 的芯片 ID 和 SDK 给出的烧录地址。完整 USB 包包含四个镜像、SHA-256、manifest、`flash_args`、`flash-command.txt` 及 `verification.json`；S31 命令保留 `--no-stub`。应用 Bin 只适用于已有正确底包的同板型升级，不能写到地址 0。固件内的升级校验也拒绝另一芯片/项目的应用。
 
-本次整合为本地测试，沿用当前正式版本号区分板型，未覆盖官网、Release 或历史固定版本下载。Metalio 代码当前保留本地/私有发布边界。两套完整构建和主机回归不等同于已在两块实机完成触摸、显示、TF 卡及低功耗验证。
+本次整合为本地测试，沿用当前正式版本号区分板型，未覆盖官网、Release 或历史固定版本下载。Metalio 源码维护在公开仓库 [Metalio-S31-kiikoread](https://github.com/wegooo-cell/Metalio-S31-kiikoread)，两套完整构建和主机回归不等同于已在两块实机完成触摸、显示、TF 卡及低功耗验证。
 
 本地同版本测试请使用对应 USB 包；设备的正常 TF/OTA 检查仍会拒绝与当前版本号相同的镜像。
 
 ## 回归命令
 
 ```sh
+python3 tools/board_layer_host_test.py
 python3 tools/board_selection_host_test.py
 python3 tools/board_selection_host_test.py --build-root build/boards
 

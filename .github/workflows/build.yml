@@ -23,6 +23,7 @@ jobs:
         shell: bash
         run: |
           python3 tools/license_notices_host_test.py
+          python3 tools/board_layer_host_test.py
           python3 tools/board_selection_host_test.py
           python3 tools/board_source_view.py --board pico --tests --output build/host/pico
       - name: S31 pipeline, power and cache regressions

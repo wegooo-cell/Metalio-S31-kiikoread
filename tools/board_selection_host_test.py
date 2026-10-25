@@ -60,11 +60,15 @@ const char *s = "#endif";
             assert subprocess.check_output([str(binary)], text=True) == '|'.join(map(str,
                 [board, info['project'], info['image_chip_id'], info['settings_namespace']]))
             # IDF requirement discovery includes helpers in separate component scopes.
+            # 中文：写进 CMake 脚本的路径必须用正斜杠，否则 Windows 盘符路径会被当成转义序列。
+            # English: Paths inside generated CMake scripts need forward slashes, or a Windows
+            # drive path is parsed as an escape sequence.
+            source_root = ROOT.as_posix()
             script = temp / 'board.cmake'
             script.write_text(f'''set(KIIKO_BOARD "{board}")
 function(component_scope component source)
-  include("{ROOT}/cmake/board.cmake")
-  kiiko_board_sources(chosen "{ROOT}/${{component}}" "${{source}}")
+  include("{source_root}/cmake/board.cmake")
+  kiiko_board_sources(chosen "{source_root}/${{component}}" "${{source}}")
   if(NOT KIIKO_SOURCE_ROOT OR NOT chosen)
     message(FATAL_ERROR "Board scope lost")
   endif()
@@ -82,7 +86,7 @@ component_scope("main" "app_main.c")
                                      '-DKIIKO_BOARD=' + board, '-DIDF_TARGET=' + wrong_target],
                                     capture_output=True, text=True)
             assert result.returncode and f"{board} requires {info['idf_target']}" in result.stderr
-        script.write_text(f'set(KIIKO_BOARD invalid)\ninclude("{ROOT}/cmake/board.cmake")\n')
+        script.write_text(f'set(KIIKO_BOARD invalid)\ninclude("{ROOT.as_posix()}/cmake/board.cmake")\n')
         result = subprocess.run(['cmake', '-P', str(script)], capture_output=True, text=True)
         assert result.returncode and 'Unknown KIIKO_BOARD' in result.stderr
 

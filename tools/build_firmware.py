@@ -21,7 +21,7 @@ def metadata(board):
     board = canonical_board(board)
     if board not in BOARDS:
         raise ValueError('Unknown board: ' + board)
-    value = json.loads((ROOT / 'boards' / board / 'board.json').read_text())
+    value = json.loads((ROOT / 'boards' / board / 'board.json').read_text(encoding='utf-8'))
     if value['id'] != board or value['idf_target'] not in ('esp32s3', 'esp32s31'):
         raise ValueError('Invalid board metadata')
     return value
@@ -54,7 +54,7 @@ def export(build, output, board):
     app = build / (info['project'] + '.bin')
     identity = check_image(app.read_bytes(), board)
     entries = partition_entries((build / 'partition_table/partition-table.bin').read_bytes())
-    csv = (ROOT / 'boards' / board / info['partitions']).read_text()
+    csv = (ROOT / 'boards' / board / info['partitions']).read_text(encoding='utf-8')
     expected = {}
     for line in csv.splitlines():
         fields = [value.strip() for value in line.split(',')]
@@ -68,7 +68,7 @@ def export(build, output, board):
     output.mkdir(parents=True, exist_ok=True)
     # 从本次SDK构建结果读取地址，S31的bootloader起点与S3不同。
     # Read this build's SDK flash plan: S31 and S3 have different bootloader offsets.
-    plan = json.loads((build / 'flasher_args.json').read_text())
+    plan = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
     loader = plan['extra_esptool_args']
     if loader['chip'] != info['idf_target']:
         raise ValueError('Flash plan uses the wrong chip')
@@ -88,15 +88,15 @@ def export(build, output, board):
             raise ValueError('Bootloader chip does not match the selected board')
         parts.append((name, source, offset))
     cache = build / 'CMakeCache.txt'
-    experimental_pie = board == 'metalio47' and cache.exists() and 'METALIO_PIE_PIXELS:BOOL=ON' in cache.read_text()
-    experimental_ripple = board == 'metalio47' and cache.exists() and 'METALIO_TEXT_RIPPLE_EXPERIMENT:BOOL=ON' in cache.read_text()
-    experimental_panel37 = board == 'metalio47' and cache.exists() and 'METALIO_READER_PANEL37_EXPERIMENT:BOOL=ON' in cache.read_text()
-    experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text()
-    experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text()
-    experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text()
-    transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text()
+    experimental_pie = board == 'metalio47' and cache.exists() and 'METALIO_PIE_PIXELS:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_ripple = board == 'metalio47' and cache.exists() and 'METALIO_TEXT_RIPPLE_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_panel37 = board == 'metalio47' and cache.exists() and 'METALIO_READER_PANEL37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text(encoding='utf-8')
+    transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text(encoding='utf-8')
     config_header=build/'config/sdkconfig.h'
-    early_key=board=='metalio47' and config_header.exists() and '#define CONFIG_METALIO_EARLY_POWER_KEY 1' in config_header.read_text()
+    early_key=board=='metalio47' and config_header.exists() and '#define CONFIG_METALIO_EARLY_POWER_KEY 1' in config_header.read_text(encoding='utf-8')
     if early_key and (len((build/'bootloader/bootloader.bin').read_bytes())>0x6000):
         raise ValueError('S31 early-key bootloader exceeds the existing 0x2000..0x8000 region')
     manifest = {'name': info['name'], 'version': identity['version'], 'board': board,
@@ -202,7 +202,7 @@ def build_one(board, args):
         # 旧缓存不能关闭S31供屏的缓存安全保证；其余选项保留。/ Migrate old S31 caches to cache-safe feeding, retaining every unrelated option.
         path = work / 'sdkconfig'
         required = ('CONFIG_LCD_RGB_ISR_IRAM_SAFE', 'CONFIG_GDMA_CTRL_FUNC_IN_IRAM')
-        lines = [line for line in path.read_text().splitlines()
+        lines = [line for line in path.read_text(encoding='utf-8').splitlines()
                  if not any(line.startswith(key + '=') or line == '# ' + key + ' is not set'
                             for key in required)]
         # 显式迁移旧配置：使用本轮S31原厂对照策略，避免旧sdkconfig掩盖defaults。
@@ -240,7 +240,7 @@ def build_one(board, args):
         extra.extend(str(path) for path in (tools / 'tools' / architecture).glob('**/bin') if path.is_dir())
         extra.extend(str(path) for path in (tools / 'tools/esp32ulp-elf').glob('**/bin') if path.is_dir())
     env['PATH'] = os.pathsep.join(extra + [env.get('PATH', '')])
-    with (work / 'build.log').open('w') as log:
+    with (work / 'build.log').open('w', encoding='utf-8', errors='replace') as log:
         result = subprocess.run(command, cwd=source, env=env, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode:
         print((work / 'build.log').read_text(errors='replace')[-8000:])
