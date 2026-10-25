@@ -93,6 +93,7 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
         ROOT / "licenses/CrossMux-MIT.txt": "CROSSMUX-MIT.txt",
         ROOT / "licenses/AnimateIcons-MIT.txt": "AnimateIcons-MIT.txt",
         ROOT / "licenses/FreeInk-SDK-MIT.txt": "FREEINK-SDK-MIT.txt",
+        ROOT / "licenses/Metalio-MIT.txt": "METALIO-MIT.txt",
     }
     (output / "licenses").mkdir(exist_ok=True)
     for source, name in licenses.items():
