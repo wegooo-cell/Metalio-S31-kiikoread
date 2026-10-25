@@ -112,6 +112,7 @@ def export(build, output, board):
                 'project': identity['project'], 'new_install_prompt_erase': False,
                 'builds': [{'chipFamily': 'ESP32-S3' if board == 'pico' else 'ESP32-S31', 'parts': []}]}
     checksums, args = [], [shlex.join(plan['write_flash_args'])]
+    flash_pairs = []
     for name, source, offset in parts:
         shutil.copy2(source, output / name)
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -119,21 +120,32 @@ def export(build, output, board):
                                              'size': source.stat().st_size, 'sha256': digest})
         checksums.append(f'{digest}  {name}\n')
         args.append(f'{offset:#x} {name}')
+        flash_pairs.extend([f'{offset:#x}', name])
     shutil.copy2(app, output / f"kiikoread-{board}-{identity['version']}.bin")
-    (output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
-    (output / 'flash_args').write_text('\n'.join(args) + '\n')
+    (output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
+                                          encoding='utf-8')
+    (output / 'flash_args').write_text('\n'.join(args) + '\n', encoding='utf-8')
     command = ['python', '-m', 'esptool', '--chip', loader['chip'], '--port', 'PORT',
                '--before', loader['before'], '--after', loader['after']]
     if not loader['stub']:
         command.append('--no-stub')
-    command.extend(['write-flash', '@flash_args'])
-    (output / 'flash-command.txt').write_text(shlex.join(command) + '\n')
-    (output / 'SHA256SUMS.txt').write_text(''.join(checksums))
+    # 中文：esptool v5 把 flash 选项挪到 write-flash 子命令，且不再解析 @flash_args，
+    # 所以给出的命令必须把选项和地址写全；flash_args 仍保留给认它的旧工具。
+    # English: esptool v5 moved the flash options onto the write-flash subcommand and no longer
+    # expands @flash_args, so the ready-to-run command spells out options and addresses; the
+    # flash_args file stays for older tools that understand it.
+    command.append('write-flash')
+    command.extend(plan['write_flash_args'])
+    command.extend(flash_pairs)
+    (output / 'flash-command.txt').write_text(shlex.join(command) + '\n', encoding='utf-8')
+    (output / 'SHA256SUMS.txt').write_text(''.join(checksums), encoding='utf-8')
     (output / '使用说明.txt').write_text(
         f"本地测试固件 / {info['name']} / {info['idf_target']} / {identity['version']}\n"
         "只用于对应设备，不可跨板型刷写。应用Bin仅用于已有正确分区的升级，不可写到地址0。\n"
-        "完整初装地址见flash_args，保留数据时不要全片擦除。当前工具只编译，不会连接或刷写设备。\n" +
-        ("本实验需要配套应用及引导程序；仅写应用无法修复短按开机，不能按普通TF/OTA更新处理。\n" if early_key else ""))
+        "完整初装命令见flash-command.txt（esptool v5 可用），旧工具可用flash_args。\n"
+        "保留数据时不要全片擦除。当前工具只编译，不会连接或刷写设备。\n" +
+        ("本实验需要配套应用及引导程序；仅写应用无法修复短按开机，不能按普通TF/OTA更新处理。\n" if early_key else ""),
+        encoding='utf-8')
     result = {'board': board, 'target': info['idf_target'], **identity,
               'partitions': entries, 'bootloader_offset': expected_offsets['bootloader'],
               'esptool_stub': loader['stub'], 'free_app_bytes': entries['ota_0'][3] - identity['size'],
