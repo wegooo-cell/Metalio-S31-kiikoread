@@ -184,6 +184,9 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+- 自动简化Z-Library格式的显示书名和作者：清理来源尾缀、嵌套重复作者、译者说明及英文并列长标题；保留TF原文件名、路径和阅读记录。文件列表不再因128字节名称缓冲而跳过长名，删除兼容书名中的省略号及接近长度上限的文件。
+  Simplify Z-Library display titles/authors, removing source tails, duplicate nested authors, translator credits and long parallel English titles while retaining original SD filenames, paths and reading records. File lists no longer discard names at a128-byte label limit; deletion accepts literal ellipses and files near the filename-length limit.
+
 - 合入 EPUB 特殊章节路径兼容、嵌套目录书籍删除、无标题页面不再补占位名及单幅插图居中；新增插图双指缩放、双击放大与拖动。图片缓存失效和刷新失败可安全重试。
   Accept EPUB colon paths, nested book deletion, unnamed-page titles and lone-image centering. Add pinch/double-tap image zoom and drag, with stale-cache and failed-refresh recovery.
 - 设置 → 显示 → 关机睡眠新增「双击解锁」开关；默认开启，关闭后单击电源键解锁，深睡唤醒沿用同一选择，锁屏密码仍需验证。
