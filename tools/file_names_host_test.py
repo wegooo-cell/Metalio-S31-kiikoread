@@ -106,8 +106,15 @@ int main(void){
  char utf_name[256];for(unsigned i=0;i<80;++i)memcpy(utf_name+3*i,"书",3);strcpy(utf_name+240,".epub");
  snprintf(s_selected.path,sizeof(s_selected.path),"%s/%s",folder,utf_name);s_selected.is_dir=false;
  f=fopen(s_selected.path,"wb");assert(f);fputs("payload",f);fclose(f);
- char copied[128];assert(copy_selected_item(copied)==0);assert(strstr(copied," 副本")-copied==99);
- char clone[288];snprintf(clone,sizeof(clone),"%s/%s",folder,copied);assert(!file_tree_delete(clone,NULL,NULL));assert(!file_tree_delete(s_selected.path,NULL,NULL));
+ char copied[128];assert(copy_selected_item(copied)==0);
+ assert(strlen(copied)<sizeof(copied));
+ // 显示提示不能用来重建真实复制目标；遍历目录核对完整副本名。/ Never rebuild a copy path from its clipped UI label.
+ char clone[288]={0};DIR *copies=opendir(folder);assert(copies);struct dirent *entry;unsigned matches=0;
+ while((entry=readdir(copies))){if(!strstr(entry->d_name," 副本.epub"))continue;
+  const char *suffix=strstr(entry->d_name," 副本.epub");assert((suffix-entry->d_name)%3==0&&suffix-entry->d_name>=99);
+  int n=snprintf(clone,sizeof(clone),"%s/%s",folder,entry->d_name);assert(n>0&&(size_t)n<sizeof(clone));++matches;
+ }
+ closedir(copies);assert(matches==1);assert(!file_tree_delete(clone,NULL,NULL));assert(!file_tree_delete(s_selected.path,NULL,NULL));
  assert(!rmdir(folder));
  puts("PASS: actual file/shelf scans, history backfill, cached-author precedence and Home labels; 3 supplied names and 255-byte basename retain real paths and delete successfully");
 }
