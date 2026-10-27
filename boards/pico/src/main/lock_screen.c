@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0
- * 中文：独立锁屏输入循环；禁止触摸键、蓝牙、拿起或冷启动绕过密码。
- * English: Isolated locked-input loop; touch keys, BLE, pickup and cold starts cannot bypass authentication.
+ * 中文：独立锁屏输入循环；触摸键、蓝牙、拿起或冷启动不得绕过密码；已选宽限期仅在锁屏按键唤醒后判定。
+ * English: Isolated locked-input loop; touch keys, BLE, pickup and cold starts cannot bypass the PIN; opt-in grace is checked only after lock-key wake.
  * 用户修订：读取失败或确认未开启时直接返回；正常读取的已有密码必须摘要验证，模糊缓存与局部输入保持。
  * User revision: return for read failure or confirmed disabled state; require digest verification for readable enabled PINs, retaining cached frost and local input.
  */
@@ -95,6 +95,9 @@ static void present_input(EpdiyHighlevelState *hl,EpdRect area){
 
 void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7a20h_handle_t acc,bool boot){
     if(!lock_pin_enabled())return;
+    // 冷启动不免密；只有锁屏唤醒或有效深睡检查点允许使用已选宽限期。
+    // Cold starts require the PIN; only lock wakes and valid deep resumes allow grace.
+    const bool allow_grace = !boot || pico_boot_has_resume();
     uint8_t *fb=epd_hl_get_framebuffer(hl);
     (void)acc;
     (void)ble_pt_stop(2000);
@@ -103,7 +106,16 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
     uint8_t *original=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>FRAME_BYTES+1024u*1024u
         ?heap_caps_malloc(FRAME_BYTES,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):NULL;
     if(original)memcpy(original,fb,FRAME_BYTES);
+    // 密码提示用纯白底：锁屏画面不再垫在密码控件下面，票根与数字互相透出且难读。
+    // 等待阶段仍显示原锁屏样式；弹出提示时才整屏刷白画键盘，取消由 restore_art 恢复。
+    // 键盘的玻璃圆键在 begin 时采样白底。
+    // The PIN prompt takes a solid white base instead of layering the lock art beneath the
+    // controls. The waiting phase keeps the original lock face; the prompt whitens the panel
+    // before painting the pad, and cancel restores the face via restore_art. The pad's glass
+    // keys sample the white ground at begin time.
+    ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
     ui_pinpad_t pad={0};ui_pinpad_begin(&pad,fb,"输入密码");
+    restore_art(fb,original);
     bool waiting=true;
     unsigned failures=0;int64_t retry_at=0;
     for(;;){
@@ -114,14 +126,30 @@ void lock_screen_authenticate(EpdiyHighlevelState *hl,cst836u_handle_t touch,sc7
             if(app_light_sleep_wait_timed(NULL,10u*60u*1000u)==APP_WAKE_TIMEOUT){
                 ui_pinpad_end(&pad);free(original);app_enter_host_sleep(APP_SLEEP_DEEP);
                 // 防御性处理：电源交接意外返回也继续验证。/ Defensive: a returning power handoff still requires verification.
-                original=NULL;ui_pinpad_begin(&pad,fb,"输入密码");
+                // 深睡回来 fb 是锁屏画面：先刷白让玻璃圆键重新采样，再由等待阶段恢复样式。
+                // After deep sleep fb holds the lock art: white it so the glass keys resample,
+                // then the waiting phase restores the art again.
+                original=NULL;ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
+                ui_pinpad_begin(&pad,fb,"输入密码");
                 continue;
             }
+        }
+        // 等待可能跨过宽限截止点；浅睡与深睡都在有效电源键唤醒后重新检查。
+        // Waiting may cross the deadline; recheck after the validated power wake in both paths.
+        if(allow_grace && lock_pin_grace_active()) {
+            ui_pinpad_end(&pad);free(original);read_pico_pmu_drain_events();
+            ble_pt_event_t e;while(ble_pt_pop_key(&e)){}
+            ble_pt_raw_t raw;while(ble_pt_pop_raw(&raw)){}
+            return;
         }
         app_lock_wait_key_idle(800);
         ui_pinpad_reset(&pad,"输入密码","");
         if(esp_timer_get_time()/1000<retry_at){pad.blocked=true;snprintf(pad.notice,sizeof(pad.notice),"请等待 10 秒后重试");}
         // 直接推送完整密码画面一次，不再补刷第二段背景。/ Present the complete PIN screen once, without a second backdrop stage.
+        // 弹出提示才刷白：等待阶段 fb 是锁屏画面，这里整屏置白再画键盘；取消由 restore_art 恢复。
+        // White only when the prompt appears: fb holds the lock art during waiting, so blank
+        // the panel here before painting the pad; cancel restores the art via restore_art.
+        ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},UI_GRAY_WHITE,fb);
         ui_pinpad_paint(fb,&pad,ui_pinpad_full());present(hl,ui_pinpad_full());
         // 密码等待不是启动失败；待验证时保留一次性恢复，不提前开书。
         // Waiting for a PIN is not a failed boot; hold one-shot resume without opening the book.

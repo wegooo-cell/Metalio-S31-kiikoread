@@ -669,10 +669,12 @@ int ttf_font_scan(void) {
             if (name[0] == '\0' || catalog_has_name(s_catalog, s_catalog_n, name)) {
                 continue;
             }
-            snprintf(
+            int path_len = snprintf(
                 s_catalog[s_catalog_n].path, sizeof(s_catalog[s_catalog_n].path),
                 "%s/%s", font_dir, ent->d_name
             );
+            // 超长路径不能截断后当成另一份字库。/ Never register a truncated path as a different font file.
+            if (path_len < 0 || (size_t)path_len >= sizeof(s_catalog[s_catalog_n].path)) continue;
             strlcpy(s_catalog[s_catalog_n].name, name, sizeof(s_catalog[0].name));
             s_catalog_n++;
         }

@@ -186,7 +186,7 @@ static void copy_title(char *dst, size_t cap, const char *src) {
 }
 
 static void title_for(home_book_t *item) {
-    if (!book_title_from_path(item->path, item->title, sizeof(item->title)))
+    if (!book_name_from_path(item->path, item->title, sizeof(item->title),item->author,sizeof(item->author)))
         copy_title(item->title, sizeof(item->title), "未命名");
 }
 
@@ -257,18 +257,25 @@ static void scan_books(void) {
         home_book_t *b=book_at(i);
         if (!b->path[0]) continue;
         title_for(b);
-        char metadata_title[128];
-        if (book_epub_metadata_cached(b->path,metadata_title,sizeof(metadata_title),b->author,sizeof(b->author))==ESP_OK && metadata_title[0])
-            copy_title(b->title,sizeof(b->title),metadata_title);
+        char metadata_title[128],metadata_author[128];
+        if (book_epub_metadata_cached(b->path,metadata_title,sizeof(metadata_title),metadata_author,sizeof(metadata_author))==ESP_OK) {
+            if(metadata_title[0])copy_title(b->title,sizeof(b->title),metadata_title);
+            bool chinese=book_author_clean_display(metadata_author,sizeof(metadata_author));
+            if(metadata_author[0]&&(chinese||!book_author_clean_display(b->author,sizeof(b->author))))
+                copy_title(b->author,sizeof(b->author),metadata_author);
+        }
     }
     home_book_t *featured = s_current.path[0] ? &s_current : &s_recent[0];
     const char *ext = strrchr(featured->path, '.');
     if (ext && !strcasecmp(ext, ".epub") && pico_boot_asset_allowed(featured->path)) {
-        char metadata_title[256];
+        char metadata_title[256],metadata_author[128];
         if (book_epub_metadata(featured->path, metadata_title, sizeof(metadata_title),
-                               featured->author, sizeof(featured->author)) != ESP_OK)
-            featured->author[0] = 0;
-        else if (metadata_title[0]) copy_title(featured->title,sizeof(featured->title),metadata_title);
+                               metadata_author, sizeof(metadata_author)) == ESP_OK) {
+            if(metadata_title[0])copy_title(featured->title,sizeof(featured->title),metadata_title);
+            bool chinese=book_author_clean_display(metadata_author,sizeof(metadata_author));
+            if(metadata_author[0]&&(chinese||!book_author_clean_display(featured->author,sizeof(featured->author))))
+                copy_title(featured->author,sizeof(featured->author),metadata_author);
+        }
     }
 }
 

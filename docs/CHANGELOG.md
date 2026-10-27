@@ -2,6 +2,11 @@
 
 ## 未发布 / Unreleased
 
+- 两机同步：改进书名、作者与已知来源后缀识别，清理重复作者、译者和冗余宣传尾注；保留原文件及操作完整路径，阅读进度不变。
+  Both boards: refine title/author and known source suffix recognition without renaming files or changing reading progress; file actions retain complete paths.
+- Pico构建对齐现有rc101的字体路径保护、黑白设置开关、白底密码框、可选密码宽限期和标题提示排版；宿主夹具按机型选择，S31电源与显示后端保持独立。
+  Pico builds retain the existingrc101 font-path guard, switches, white PIN prompt, opt-in grace and title notices; host fixtures select the board without replacing S31 power/display backends.
+
 - 两机同步：兼容部分 EPUB 制作工具写入的本地头全零 ZIP64 预留字段，修复小书被误报为资源超限；保留32位尺寸、范围和CRC校验，真正的ZIP64仍不支持。
   Both boards: accept a narrowly validated zero-filled local ZIP64 placeholder without admitting real ZIP64 archives; retain size, range and CRC checks.
 

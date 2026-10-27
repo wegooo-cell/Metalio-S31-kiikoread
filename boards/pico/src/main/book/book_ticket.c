@@ -274,11 +274,15 @@ bool book_ticket_draw(uint8_t *fb, bool reader_background) {
     book_progress_t progress = {0};
     bool progress_valid = file_valid && book_progress_load(path, st.st_size, &progress);
     char title[256] = {0}, author[128] = {0};
-    if (!book_title_from_path(path, title, sizeof(title))) snprintf(title, sizeof(title), "未命名");
+    if (!book_name_from_path(path,title,sizeof(title),author,sizeof(author))) snprintf(title, sizeof(title), "未命名");
     const char *ext = strrchr(path, '.');
     if (ext && !strcasecmp(ext, ".epub")) {
-        char meta_title[256] = {0};
-        (void)book_epub_metadata_cached(path, meta_title, sizeof(meta_title), author, sizeof(author));
+        char meta_title[256] = {0},meta_author[128]={0};
+        if(book_epub_metadata_cached(path,meta_title,sizeof(meta_title),meta_author,sizeof(meta_author))==ESP_OK&&meta_author[0]) {
+            bool chinese=book_author_clean_display(meta_author,sizeof(meta_author));
+            if(meta_author[0]&&(chinese||!book_author_clean_display(author,sizeof(author))))
+                snprintf(author,sizeof(author),"%s",meta_author);
+        }
     }
     ticket_stats_t stats; stats_load(&stats);
     uint32_t day = local_day();

@@ -571,6 +571,21 @@ void app_restart_host(void) {
     while (true) vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
+// 密码宽限期内免验证：时钟无效或未记录时一律视为过期（安全回落要密码）。
+// Inside the PIN grace window no prompt is needed; an invalid clock or a missing
+// record always reads as expired so the safe fallback is the prompt itself.
+bool lock_pin_grace_active(void) {
+    if (!lock_pin_enabled() || !app_settings_pin_grace_minutes()) return false;
+    const pmu_snapshot_t *pmu = read_pico_pmu_get();
+    time_t now = time(NULL);
+    if (now < 1704067200 && pmu && pmu->time_synced) now = pmu->unix_sec;
+    if (now < 1704067200) return false;
+    uint32_t locked_at = app_settings_pin_locked_at();
+    if (!locked_at) return false;
+    return (uint32_t)now >= locked_at &&
+           (uint32_t)now - locked_at < (uint32_t)app_settings_pin_grace_minutes() * 60u;
+}
+
 void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
     bool reader_background
@@ -629,7 +644,18 @@ void enter_lock_and_sleep(
     epd_poweroff();
     s_lock_hint_hl=hl;s_lock_hint.serial=read_pico_pmu_lock_key_serial();
     app_wake_source_t wake = APP_WAKE_KEY;
-    if (lock_pin_enabled()) lock_screen_authenticate(hl, touch, acc, false);
+    // 密码宽限期：锁屏时记录时刻，宽限期内跳过密码直接浅睡；超时或时钟无效则照常验证。
+    // PIN grace: record the lock moment and skip the PIN inside the window; expired or
+    // invalid clocks verify as usual.
+    if (lock_pin_enabled()) {
+        const pmu_snapshot_t *pmu = read_pico_pmu_get();
+        time_t now = time(NULL);
+        if (now < 1704067200 && pmu && pmu->time_synced) now = pmu->unix_sec;
+        app_settings_record_pin_lock((uint32_t)now);
+        // 宽限判定由密码循环在实际按键唤醒后执行，不能在开始等待时提前放行。
+        // The PIN loop checks grace after the actual wake key, never before waiting.
+        lock_screen_authenticate(hl, touch, acc, false);
+    }
     else wake = app_light_sleep_wait_timed(NULL, APP_LOCK_LIGHT_SLEEP_MS);
     while (wake == APP_WAKE_TIMEOUT) {
         // PMU SOFT_SLEEP drops the ESP rail while keeping its RTC alive. A short
