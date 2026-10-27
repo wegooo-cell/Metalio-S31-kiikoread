@@ -21,7 +21,7 @@ def metadata(board):
     board = canonical_board(board)
     if board not in BOARDS:
         raise ValueError('Unknown board: ' + board)
-    value = json.loads((ROOT / 'boards' / board / 'board.json').read_text())
+    value = json.loads((ROOT / 'boards' / board / 'board.json').read_text(encoding='utf-8'))
     if value['id'] != board or value['idf_target'] not in ('esp32s3', 'esp32s31'):
         raise ValueError('Invalid board metadata')
     return value
@@ -54,7 +54,7 @@ def export(build, output, board):
     app = build / (info['project'] + '.bin')
     identity = check_image(app.read_bytes(), board)
     entries = partition_entries((build / 'partition_table/partition-table.bin').read_bytes())
-    csv = (ROOT / 'boards' / board / info['partitions']).read_text()
+    csv = (ROOT / 'boards' / board / info['partitions']).read_text(encoding='utf-8')
     expected = {}
     for line in csv.splitlines():
         fields = [value.strip() for value in line.split(',')]
@@ -68,7 +68,7 @@ def export(build, output, board):
     output.mkdir(parents=True, exist_ok=True)
     # 从本次SDK构建结果读取地址，S31的bootloader起点与S3不同。
     # Read this build's SDK flash plan: S31 and S3 have different bootloader offsets.
-    plan = json.loads((build / 'flasher_args.json').read_text())
+    plan = json.loads((build / 'flasher_args.json').read_text(encoding='utf-8'))
     loader = plan['extra_esptool_args']
     if loader['chip'] != info['idf_target']:
         raise ValueError('Flash plan uses the wrong chip')
@@ -88,15 +88,15 @@ def export(build, output, board):
             raise ValueError('Bootloader chip does not match the selected board')
         parts.append((name, source, offset))
     cache = build / 'CMakeCache.txt'
-    experimental_pie = board == 'metalio47' and cache.exists() and 'METALIO_PIE_PIXELS:BOOL=ON' in cache.read_text()
-    experimental_ripple = board == 'metalio47' and cache.exists() and 'METALIO_TEXT_RIPPLE_EXPERIMENT:BOOL=ON' in cache.read_text()
-    experimental_panel37 = board == 'metalio47' and cache.exists() and 'METALIO_READER_PANEL37_EXPERIMENT:BOOL=ON' in cache.read_text()
-    experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text()
-    experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text()
-    experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text()
-    transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text()
+    experimental_pie = board == 'metalio47' and cache.exists() and 'METALIO_PIE_PIXELS:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_ripple = board == 'metalio47' and cache.exists() and 'METALIO_TEXT_RIPPLE_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_panel37 = board == 'metalio47' and cache.exists() and 'METALIO_READER_PANEL37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text(encoding='utf-8')
+    transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text(encoding='utf-8')
     config_header=build/'config/sdkconfig.h'
-    early_key=board=='metalio47' and config_header.exists() and '#define CONFIG_METALIO_EARLY_POWER_KEY 1' in config_header.read_text()
+    early_key=board=='metalio47' and config_header.exists() and '#define CONFIG_METALIO_EARLY_POWER_KEY 1' in config_header.read_text(encoding='utf-8')
     if early_key and (len((build/'bootloader/bootloader.bin').read_bytes())>0x6000):
         raise ValueError('S31 early-key bootloader exceeds the existing 0x2000..0x8000 region')
     manifest = {'name': info['name'], 'version': identity['version'], 'board': board,
@@ -112,6 +112,7 @@ def export(build, output, board):
                 'project': identity['project'], 'new_install_prompt_erase': False,
                 'builds': [{'chipFamily': 'ESP32-S3' if board == 'pico' else 'ESP32-S31', 'parts': []}]}
     checksums, args = [], [shlex.join(plan['write_flash_args'])]
+    flash_pairs = []
     for name, source, offset in parts:
         shutil.copy2(source, output / name)
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -119,21 +120,32 @@ def export(build, output, board):
                                              'size': source.stat().st_size, 'sha256': digest})
         checksums.append(f'{digest}  {name}\n')
         args.append(f'{offset:#x} {name}')
+        flash_pairs.extend([f'{offset:#x}', name])
     shutil.copy2(app, output / f"kiikoread-{board}-{identity['version']}.bin")
-    (output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
-    (output / 'flash_args').write_text('\n'.join(args) + '\n')
+    (output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
+                                          encoding='utf-8')
+    (output / 'flash_args').write_text('\n'.join(args) + '\n', encoding='utf-8')
     command = ['python', '-m', 'esptool', '--chip', loader['chip'], '--port', 'PORT',
                '--before', loader['before'], '--after', loader['after']]
     if not loader['stub']:
         command.append('--no-stub')
-    command.extend(['write-flash', '@flash_args'])
-    (output / 'flash-command.txt').write_text(shlex.join(command) + '\n')
-    (output / 'SHA256SUMS.txt').write_text(''.join(checksums))
+    # 中文：esptool v5 把 flash 选项挪到 write-flash 子命令，且不再解析 @flash_args，
+    # 所以给出的命令必须把选项和地址写全；flash_args 仍保留给认它的旧工具。
+    # English: esptool v5 moved the flash options onto the write-flash subcommand and no longer
+    # expands @flash_args, so the ready-to-run command spells out options and addresses; the
+    # flash_args file stays for older tools that understand it.
+    command.append('write-flash')
+    command.extend(plan['write_flash_args'])
+    command.extend(flash_pairs)
+    (output / 'flash-command.txt').write_text(shlex.join(command) + '\n', encoding='utf-8')
+    (output / 'SHA256SUMS.txt').write_text(''.join(checksums), encoding='utf-8')
     (output / '使用说明.txt').write_text(
         f"本地测试固件 / {info['name']} / {info['idf_target']} / {identity['version']}\n"
         "只用于对应设备，不可跨板型刷写。应用Bin仅用于已有正确分区的升级，不可写到地址0。\n"
-        "完整初装地址见flash_args，保留数据时不要全片擦除。当前工具只编译，不会连接或刷写设备。\n" +
-        ("本实验需要配套应用及引导程序；仅写应用无法修复短按开机，不能按普通TF/OTA更新处理。\n" if early_key else ""))
+        "完整初装命令见flash-command.txt（esptool v5 可用），旧工具可用flash_args。\n"
+        "保留数据时不要全片擦除。当前工具只编译，不会连接或刷写设备。\n" +
+        ("本实验需要配套应用及引导程序；仅写应用无法修复短按开机，不能按普通TF/OTA更新处理。\n" if early_key else ""),
+        encoding='utf-8')
     result = {'board': board, 'target': info['idf_target'], **identity,
               'partitions': entries, 'bootloader_offset': expected_offsets['bootloader'],
               'esptool_stub': loader['stub'], 'free_app_bytes': entries['ota_0'][3] - identity['size'],
@@ -202,7 +214,7 @@ def build_one(board, args):
         # 旧缓存不能关闭S31供屏的缓存安全保证；其余选项保留。/ Migrate old S31 caches to cache-safe feeding, retaining every unrelated option.
         path = work / 'sdkconfig'
         required = ('CONFIG_LCD_RGB_ISR_IRAM_SAFE', 'CONFIG_GDMA_CTRL_FUNC_IN_IRAM')
-        lines = [line for line in path.read_text().splitlines()
+        lines = [line for line in path.read_text(encoding='utf-8').splitlines()
                  if not any(line.startswith(key + '=') or line == '# ' + key + ' is not set'
                             for key in required)]
         # 显式迁移旧配置：使用本轮S31原厂对照策略，避免旧sdkconfig掩盖defaults。
@@ -240,7 +252,7 @@ def build_one(board, args):
         extra.extend(str(path) for path in (tools / 'tools' / architecture).glob('**/bin') if path.is_dir())
         extra.extend(str(path) for path in (tools / 'tools/esp32ulp-elf').glob('**/bin') if path.is_dir())
     env['PATH'] = os.pathsep.join(extra + [env.get('PATH', '')])
-    with (work / 'build.log').open('w') as log:
+    with (work / 'build.log').open('w', encoding='utf-8', errors='replace') as log:
         result = subprocess.run(command, cwd=source, env=env, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode:
         print((work / 'build.log').read_text(errors='replace')[-8000:])

@@ -23,6 +23,7 @@ static int file_mode = S_IFREG, file_error, unlink_error, forget_error, unlinks,
 static bool sd_exists = true, flash_exists = true;
 static bool legacy_dir;
 static bool backup_exists;
+static unsigned backup_probes;static bool reject_long_backup;
 static int backup_mode = S_IFREG, backup_unlink_error, rename_error;
 static char forgotten[BOOK_STORE_PATH_MAX];
 const char* app_settings_books_dir(void) { return "/sdcard/books"; }
@@ -43,6 +44,9 @@ static int mock_stat(const char* path, struct stat* out) {
         out->st_mode = is_directory ? S_IFDIR : S_IFREG; return 0;
     }
     if (strstr(path, ".rename-backup")) {
+        ++backup_probes;
+        const char *base=strrchr(path,'/');
+        if(reject_long_backup&&base&&strlen(base+1)>255){errno=ENAMETOOLONG;return -1;}
         if (!backup_exists) { errno = ENOENT; return -1; }
         out->st_mode = backup_mode; return 0;
     }
@@ -201,6 +205,17 @@ int main(void) {
     memset(long_path + 14, 'x', 252);
     strcpy(long_path + 266, ".txt");
     assert(book_store_delete(long_path, &removed) == ESP_ERR_INVALID_ARG && !removed);
+    // 最大合法英文文件名不能探测根本不存在的超长备份；UTF-8按字符单元而非字节判断。
+    // Maximal ASCII names must not probe impossible backups; UTF-8 uses character units, not bytes.
+    strcpy(long_path,"/sdcard/books/");memset(long_path+14,'x',251);strcpy(long_path+265,".txt");
+    sd_exists=true;reject_long_backup=true;unsigned probes=backup_probes;
+    assert(book_store_delete(long_path,&removed)==ESP_OK&&removed&&backup_probes==probes);
+    strcpy(long_path,"/sdcard/books/");for(unsigned i=0;i<80;++i)memcpy(long_path+14+3*i,"书",3);strcpy(long_path+254,".txt");
+    sd_exists=true;reject_long_backup=false;probes=backup_probes;
+    assert(book_store_delete(long_path,&removed)==ESP_OK&&removed&&backup_probes==probes+1);
+    sd_exists=true;assert(book_store_delete("/sdcard/books/很长...的书名.epub",&removed)==ESP_OK&&removed);
+    assert(book_store_delete("/sdcard/books/../foreign.epub",&removed)==ESP_ERR_INVALID_ARG&&!removed);
+    assert(book_store_delete("/sdcard/books/./foreign.epub",&removed)==ESP_ERR_INVALID_ARG&&!removed);
     sd_mounted = false;
     assert(book_store_delete(path, &removed) == ESP_ERR_INVALID_STATE && !removed);
     s_wl = WL_INVALID_HANDLE;

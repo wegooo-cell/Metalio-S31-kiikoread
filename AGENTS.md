@@ -26,14 +26,14 @@ Pico需要 ESP-IDF v6.1。`components/read_pico/read_pico_flash_hpm.c` 依赖 v6
 Requires ESP-IDF v6.1. `components/read_pico/read_pico_flash_hpm.c` needs `esp_flash_chips/spi_flash_override.h` (v6 only).
 
 ```
-idf.py set-target esp32s3
-idf.py build
+python3 tools/build_firmware.py --board pico --python /path/to/idf-python/bin/python
+python3 tools/build_firmware.py --board metalio47 --python /path/to/idf-python/bin/python
 ```
 
-- `sdkconfig.defaults`：真机 120 MHz flash / PSRAM 时序，依赖板上 Zbit 型号。/ Board timing for 120 MHz flash / PSRAM; depends on the Zbit part.
-- `sdkconfig.ci`：默认时序，只验证能否编过。/ Default timing; compile-only CI check.
+- 板级选择层：`boards/<设备>/` 拥有身份、板级 sdkconfig、分区表、依赖锁与硬件后端；`cmake/board.cmake` 在 `project()` 之前选板，`-DKIIKO_BOARD=pico|metalio47`。/ Board selection layer: `boards/<device>/` owns identity, board sdkconfig, partitions, dependency lock and hardware back end; `cmake/board.cmake` selects before `project()`.
+- 板级配置只放在 `boards/<设备>/`，仓库根不再有 `sdkconfig.defaults`、`sdkconfig.ci` 或 `partitions*.csv` 副本；`tools/board_layer_host_test.py` 守着这条规则。/ Board config lives only under `boards/<device>/`; the repository root keeps no `sdkconfig.defaults`, `sdkconfig.ci` or `partitions*.csv` copies, and `tools/board_layer_host_test.py` enforces that.
 
-不要在没有对应 flash 的机器上把 CI 配置当产品默认。/ Do not ship the CI timing as the product default.
+两块板共用同一份 `main/`、`components/` 维护源码；只有硬件、驱动和确有平台差异的行为才放进 `boards/<设备>/src/` 覆盖。/ Both boards share one `main/` and `components/` source; only hardware, driver and platform-specific behaviour live in the `boards/<device>/src/` overlay.
 
 ### 版本号与本地测试 / Versions and local tests
 

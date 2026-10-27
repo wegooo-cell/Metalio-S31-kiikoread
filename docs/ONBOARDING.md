@@ -72,7 +72,7 @@ This document is for **first-time human developers and AI agents**. After readin
 | **本机安装 ESP-IDF v6.1** | 钉死 v6.1 | 是（直连 COM 口，`idf.py flash monitor` 一条龙） | 日常开发首选 | 未实测 |
 | **纯 `docker run` 编译**（§3.3） | `espressif/idf:v6.1` | 否；产物在宿主 `build/`，用 §3.4 从宿主烧 | 不想装 IDF、不想折腾 devcontainer | **已实测通过** |
 | **devcontainer**（[.devcontainer/](../.devcontainer/)） | `devcontainer.json` 里 `build.args.DOCKER_TAG` 钉 v6.1 | 否（Windows 下容器看不到 COM 口）；同上从宿主烧 | 想在容器里用 IDF 扩展 / 调试 | 启动踩坑已解决（§13），编译路径同 docker run |
-| **CI**（[.github/workflows/build.yml](../.github/workflows/build.yml)） | 容器 `espressif/idf:v6.1` | 否 | 编译回归（用 `sdkconfig.ci`） | 由 GitHub 跑 |
+| **CI**（[.github/workflows/build.yml](../.github/workflows/build.yml)） | 容器 `espressif/idf:v6.1` | 否 | 双板矩阵构建 + 打包校验（用各板 `boards/<设备>/sdkconfig.defaults`） | 由 GitHub 跑 |
 
 **必须 v6.1**：`components/read_pico/read_pico_flash_hpm.c` 依赖 v6 才有的 `esp_flash_chips/spi_flash_override.h`；[dependencies.lock](../dependencies.lock) 记录 `idf 6.1.0`。
 
@@ -93,7 +93,7 @@ This document is for **first-time human developers and AI agents**. After readin
 ```powershell
 docker pull espressif/idf:v6.1
 docker run --rm -v ${PWD}:/workspaces/read_pico_firmware -w /workspaces/read_pico_firmware espressif/idf:v6.1 `
-  bash -lc '. /opt/esp/idf/export.sh >/dev/null 2>&1; idf.py --version; idf.py set-target esp32s3; idf.py build'
+  bash -lc '. /opt/esp/idf/export.sh >/dev/null 2>&1; python tools/build_firmware.py --board pico --idf-pico "$IDF_PATH" --python "$(command -v python)"'
 ```
 
 - 第一次 pull 体积大；全量 build 约 786 个编译步骤，耐心等到 `Project build complete`。中途看进度：另开终端 `docker ps` 找容器名，`docker logs --tail 50 <name>`。
@@ -166,35 +166,34 @@ Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPDeviceID -match 'VID_303A
 
 ## 4. 编译 / 烧写 / 监视 / Build, flash, monitor
 
-### 4.1 标准命令（本机有 idf.py）
+### 4.1 标准命令（走板级构建器）
 
 ```bash
-idf.py set-target esp32s3        # 首次或换目标；会生成 sdkconfig（已 gitignore）
-idf.py build
-idf.py -p COMx flash monitor     # Ctrl+] 退出 monitor
-idf.py size                       # CI 也跑这一步
+# 选中板型后由构建器生成独立设备视图，再调用该板的 IDF；两块板不能共用构建目录
+python3 tools/build_firmware.py --board pico --python /path/to/idf-python/bin/python
+python3 tools/build_firmware.py --board metalio47 --python /path/to/idf-python/bin/python
 ```
 
-`idf.py flash` 内部就是 `esptool write_flash @flash_args`，三段镜像各归其位。没有 idf.py 的宿主走 §3.4。
+产物在 `build/boards/packages/`（USB 包、manifest、SHA-256、`flash-command.txt`），烧写命令见包内文件；板型差异与构建细节见 [BOARDS.md](BOARDS.md)。
 
-烧写会**覆盖**设备出厂应用固件，但按当前 `flash_args` 不会写入 NVS；睡眠模式 / 字体选择 / 自检结果会保留。VCOM 在 PMU 里，不受影响。分区表 [partitions_16M.csv](../partitions_16M.csv)：nvs 0x9000/0x5000、phy_init 0xE000/0x1000、factory app 0x10000/2 MB、spiffs 0x500000/5 MB（当前代码未挂载 spiffs，仅预留）。
+烧写会**覆盖**设备应用固件，但按当前 `flash_args` 不会写入 NVS；睡眠模式 / 字体选择 / 自检结果会保留。VCOM 在 PMU 里，不受影响。分区表按板型：Pico [boards/pico/partitions.csv](../boards/pico/partitions.csv)（双 4 MB OTA 槽 + 5 MB storage），Metalio [boards/metalio47/partitions.csv](../boards/metalio47/partitions.csv)（双 5 MB OTA 槽 + 5.875 MB storage + coredump，16 MB flash）。
 
 ### 4.2 CI 等价编译（只验证能不能编过）
 
+CI 对 `pico`、`metalio47` 各跑一轮板级构建与打包校验（`matrix.board`），不再使用单独的 CI 配置：
+
 ```bash
-idf.py -DSDKCONFIG_DEFAULTS=sdkconfig.ci set-target esp32s3
-idf.py build
-idf.py size
+python3 tools/build_firmware.py --board all --python /path/to/idf-python/bin/python --dry-run
 ```
 
-### 4.3 两套 sdkconfig 的边界
+### 4.3 sdkconfig 的归属
 
 | 文件 | 用途 | 关键差异 |
 | --- | --- | --- |
-| [sdkconfig.defaults](../sdkconfig.defaults) | **产品默认**，真机用 | flash 120 MHz + HPM（HPM_DC 关）、Octal PSRAM 120 MHz、`SPIRAM_TIMING_TUNING` 类温度调优 **保持关闭**（板上 Zbit 0x5E 不在 IDF 验证表里，开了会在 `do_system_init_fn` abort）、64 KB 数据缓存 / 64 B 行、CPU 240 MHz、USB Serial/JTAG 控制台、FreeRTOS 1000 Hz、性能优化 |
-| [sdkconfig.ci](../sdkconfig.ci) | **仅编译检查** | PSRAM 80 MHz、无 120 MHz/HPM、`COMPILER_WARN_WRITE_STRINGS=y` |
+| [boards/pico/sdkconfig.defaults](../boards/pico/sdkconfig.defaults) | Pico 产品默认，真机用 | flash 120 MHz + HPM（HPM_DC 关）、Octal PSRAM 120 MHz、`SPIRAM_TIMING_TUNING` 类温度调优 **保持关闭**（板上 Zbit 0x5E 不在 IDF 验证表里，开了会在 `do_system_init_fn` abort）、64 KB 数据缓存 / 64 B 行、CPU 240 MHz、USB Serial/JTAG 控制台、FreeRTOS 1000 Hz、性能优化 |
+| [boards/metalio47/sdkconfig.defaults](../boards/metalio47/sdkconfig.defaults) | Metalio 产品默认，真机用 | S31 板级时序、外设与 16 MB 分区，细节见文件本身 |
 
-规则：不要把 CI 时序当产品默认；不要把 `sdkconfig.defaults` 用到别的硬件上；`sdkconfig`（生成物）永远不提交。
+规则：板级配置只放在 `boards/<设备>/`，仓库根不再有 `sdkconfig.defaults`、`sdkconfig.ci` 或 `partitions*.csv` 副本；不要把一块板的配置用到另一块硬件上；`sdkconfig`（生成物）永远不提交。
 
 ### 4.4 生成物与忽略项
 
@@ -368,7 +367,7 @@ flowchart TD
 ### 8.5 波形 / 时序禁区
 
 - 不改 `waveforms/*.h`；要试新裁剪参数走 `e0470_waveform_trim.c` 的 API（默认 erase_max 11 / sat_cut 5 / white_sat_cut 0 / hold 3）。
-- 不改 `sdkconfig.defaults` 的 120 MHz 与 HPM 相关项；不开 `SPIRAM_TIMING_TUNING`。
+- 不改 `boards/pico/sdkconfig.defaults` 的 120 MHz 与 HPM 相关项；不开 `SPIRAM_TIMING_TUNING`。
 - pclk 只在 12–24 MHz 内调，且优先改 `display.c` 常量而不是散落调用。
 
 ### 8.6 换开机图 / 锁屏图
@@ -386,7 +385,7 @@ flowchart TD
 - [ ] 没有写 SY7636A 的 VCOM / VLDO / 放电 / 延时 / VCOMCTL。
 - [ ] 没有在 `vcom_setup.c` 以外调用 `read_pico_pmu_vcom_set`；没有把 VCOM 写进 NVS。
 - [ ] 没有碰 `components/epdiy/**`、`main/font/fallback.h`、`stb_truetype.h`、`waveforms/*.h`。
-- [ ] 没有动 `sdkconfig.defaults` 的 120 MHz / HPM / PSRAM 项。
+- [ ] 没有动 `boards/<设备>/sdkconfig.defaults` 的 120 MHz / HPM / PSRAM 项。
 - [ ] 没有改 UI 字面量或日志字符串（除非任务明确要求）。
 - [ ] `render()` 仍然纯。
 - [ ] 没有改 `app_loop.c` 来加页面功能。
@@ -415,8 +414,8 @@ flowchart TD
 | 标签 | 含义 |
 | --- | --- |
 | `未编译` | 只改了文件，没跑 build |
-| `已编译 ci` | `-DSDKCONFIG_DEFAULTS=sdkconfig.ci` 通过 |
-| `已编译 defaults` | 默认配置 build 通过（还未上板）。写明在哪里编的：本机 IDF / docker run / devcontainer |
+| `已编译 ci` | 该板的 `tools/build_firmware.py --board <设备>` 通过（与 CI 同一组板级配置） |
+| `已编译 defaults` | 板级默认配置 build 通过（还未上板）。写明在哪里编的：本机 IDF / docker run / devcontainer |
 | `已烧写未验证启动` | esptool `Hash of data verified` 了，但**没开串口看开机日志**。必须附烧写命令原文（尤其地址）。不得写成"真机已验证" |
 | `真机已验证` | 必须附：板型 RDP-G01-W、IDF 版本、串口、供电（USB/电池）、串口里看到的开机日志片段、验证了哪些页/操作、未覆盖项 |
 

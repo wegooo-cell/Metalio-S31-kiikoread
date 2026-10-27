@@ -28,6 +28,9 @@ typedef enum {
     APP_WAKE_TIMEOUT,
 } app_wake_source_t;
 
+/// 已确认按键唤醒后检查有效时钟下的免密期限。/ Check grace with a valid clock only after confirmed key wake.
+bool lock_pin_grace_active(void);
+
 #if KIIKO_BOARD_METALIO47
 /// 解锁后继续浅睡媒体恢复，未完成时保留挂起的字体/书籍句柄。/ Continue light-sleep media recovery after unlock, retaining pending font/book handles.
 bool app_sleep_media_ready(void);
@@ -43,8 +46,6 @@ void app_lock_feedback(EpdiyHighlevelState *hl);
 void app_lock_set_resume_ready(bool ready);
 /// 在硬件初始化前锁存深睡电源键唤醒原因。/ Capture a deep-sleep power wake before hardware initialization.
 void app_lock_capture_boot_wakeup(void);
-/// 已确认按键唤醒后检查有效时钟下的免密期限。/ Check grace with a valid clock only after confirmed key wake.
-bool lock_pin_grace_active(void);
 /// 深睡保留物理锁图，卡就绪后恢复真实参考；NULL在解锁绘制前取消。
 /// Retain physical lock art across deep boot and restore references when media is ready; NULL cancels before unlock drawing.
 bool app_lock_resume_frame(EpdiyHighlevelState *hl);

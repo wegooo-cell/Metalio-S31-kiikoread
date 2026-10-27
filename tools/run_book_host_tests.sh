@@ -13,6 +13,8 @@ gcc "${flags[@]}" -Itools/book_layout_stubs -Itools/book_source_host_stubs tools
 gcc "${flags[@]}" -Itools/book_storage_stubs tools/book_storage_host_test.c main/book/book_progress.c -o build/book-tests/progress
 gcc "${flags[@]}" -Imain -Itools/book_storage_stubs -Icomponents/read_pico/include tools/book_store_host_test.c -o build/book-tests/store
 gcc "${flags[@]}" tools/book_policy_host_test.c -o build/book-tests/policy
+gcc "${flags[@]}" -ffunction-sections -fdata-sections "${link_gc[@]}" -Itools/book_storage_stubs tools/book_name_host_test.c main/book/book_title.c -o build/book-tests/book-name
+build/book-tests/book-name
 build/book-tests/source build/book-fixtures/books/*.txt build/book-fixtures/books/*.epub
 build/book-tests/layout
 build/book-tests/progress

@@ -171,8 +171,24 @@ const EpdWaveform* display_main_ui_waveform(void) {
     return display_main_normal_waveform();
 }
 
-// 设置滚动复用八相灰阶差分：只向目标灰度推动，不先清白/压黑；字缘目标不二值化。
-// Settings scrolling reuses eight-phase gray differences: drive only toward the target without white/black resets or binarizing glyph edges.
+// 设置滚动只撤掉额外四相补白；中灰、字缘与原DU的完整擦白保持，不改其他页面或周期清理。
+// Settings scrolling omits only four extra whitening phases, retaining midgrays, AA edges and native DU erasure without changing other pages or cleanup.
 const EpdWaveform* display_settings_scroll_waveform(void) {
-    return &E0470_FOLLOW_WAVEFORM;
+    static EpdWaveformPhases phases;
+    static const EpdWaveformPhases *ranges[]={&phases};
+    static EpdWaveformMode mode={MODE_GL16,1,ranges};
+    static const EpdWaveformMode *modes[]={&mode};
+    static EpdWaveform waveform={.num_modes=1,.num_temp_ranges=1,.mode_data=modes};
+    if(phases.luts)return &waveform;
+    const EpdWaveform *base=display_main_normal_waveform();
+    const EpdWaveformPhases *original=e0470_waveform_phases(base,MODE_GL16);
+    if(!original||!original->luts||original->phases!=E0470_GL16_FRAMES||original->phase_times)return base;
+    uint8_t *data=heap_caps_malloc(E0470_GL16_FRAMES*16*4,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!data)return base;
+    memcpy(data,original->luts,E0470_GL16_FRAMES*16*4);
+    for(int f=E0470_FULL_DU_FRAMES;f<E0470_GL16_FRAMES;++f)
+        memset(data+(f*16+15)*4,0,4);
+    phases=(EpdWaveformPhases){E0470_GL16_FRAMES,data,NULL};
+    waveform.temp_intervals=base->temp_intervals;
+    return &waveform;
 }

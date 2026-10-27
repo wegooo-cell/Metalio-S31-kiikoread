@@ -164,7 +164,15 @@ esp_err_t book_store_delete(const char* path, bool* removed) {
         if (!sd_ready()) return ESP_ERR_INVALID_STATE;
     }
     size_t len = strlen(name);
-    if (!len || name[0] == '/' || name[len - 1] == '/' || strstr(name, "//") || strstr(name, "..")) return ESP_ERR_INVALID_ARG;
+    if (!len || name[0] == '/' || name[len - 1] == '/' || strstr(name, "//")) return ESP_ERR_INVALID_ARG;
+    // 只拒绝独立的路径穿越段；书名中的省略号“...”是合法字符。
+    // Reject traversal components, while keeping literal ellipses in real book names.
+    for(const char *component=name;*component;){
+        const char *end=strchr(component,'/');size_t n=end?(size_t)(end-component):strlen(component);
+        if((n==1&&component[0]=='.')||(n==2&&!memcmp(component,"..",2)))return ESP_ERR_INVALID_ARG;
+        if(!end)break;
+        component=end+1;
+    }
     for (const unsigned char* p = (const unsigned char*)name; *p; ++p) {
         if (*p < 32 || *p == 127 || *p == '\\' || *p == ':') return ESP_ERR_INVALID_ARG;
     }
@@ -188,15 +196,21 @@ esp_err_t book_store_delete(const char* path, bool* removed) {
     // 显式删除也处理覆盖备份，避免下次传书启动恢复已删图书。
     // Explicit deletion handles replacement backups so transfer startup cannot resurrect deleted books.
     const char suffix[] = ".rename-backup";
-    // 备份名比正文多 13 字节，仍在缓冲内；更长的基名不可能有对应备份文件。
-    // The backup name is 13 bytes longer and still fits; longer base names cannot have one.
+    // FAT的255上限按UTF-16单元计数；不存在的超长备份名不能阻止删除正常原书。
+    // FAT counts 255 UTF-16 units; an impossible backup name must not block deleting the real book.
+    size_t units=sizeof(suffix)-1;
+    for(const unsigned char *p=(const unsigned char*)base;*p;++p)
+        if((*p&0xc0)!=0x80)units+=*p>=0xf0?2:1;
     char backup[BOOK_STORE_PATH_MAX + sizeof(suffix)];
     snprintf(backup, sizeof(backup), "%s%s", path, suffix);
+    result=-1;errno=ENOENT;
+    if(units<=255){
 #ifdef ESP_PLATFORM
-    result = stat(backup, &st);
+        result = stat(backup, &st);
 #else
-    result = lstat(backup, &st);
+        result = lstat(backup, &st);
 #endif
+    }
     if (result != 0) {
         if (errno != ENOENT) return ESP_FAIL;
     } else {

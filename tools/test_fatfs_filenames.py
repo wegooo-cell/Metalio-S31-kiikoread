@@ -12,11 +12,15 @@ IDF = Path(os.environ.get("IDF_PATH", "/opt/esp/idf"))
 
 
 def main():
-    for name in ("sdkconfig.defaults", "sdkconfig.ci"):
-        defaults = (ROOT / name).read_text(encoding="utf-8")
-        assert "CONFIG_FATFS_LFN_HEAP=y" in defaults
-        assert "CONFIG_FATFS_API_ENCODING_UTF_8=y" in defaults
-        assert "CONFIG_FATFS_API_ENCODING_ANSI_OEM=y" not in defaults
+    # 每块板自己的 sdkconfig.defaults 是唯一配置来源；根目录不再有共享副本。
+    # Each board's own sdkconfig.defaults is the single config source; the root has no copy.
+    boards = sorted(path for path in (ROOT / "boards").glob("*/sdkconfig.defaults"))
+    assert boards, "no board sdkconfig.defaults found under boards/"
+    for defaults_path in boards:
+        defaults = defaults_path.read_text(encoding="utf-8")
+        assert "CONFIG_FATFS_LFN_HEAP=y" in defaults, defaults_path
+        assert "CONFIG_FATFS_API_ENCODING_UTF_8=y" in defaults, defaults_path
+        assert "CONFIG_FATFS_API_ENCODING_ANSI_OEM=y" not in defaults, defaults_path
     src = IDF / "components/fatfs/src"
     with tempfile.TemporaryDirectory(prefix="fatfs-name-") as temp:
         work = Path(temp)

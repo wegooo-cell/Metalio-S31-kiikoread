@@ -60,7 +60,7 @@ def materialize(root, destination, board, tests=False):
         raise ValueError('Do not generate build views inside maintained source directories')
     destination.mkdir(parents=True, exist_ok=True)
     marker = destination / '.kiiko-source-view.json'
-    previous = json.loads(marker.read_text()) if marker.exists() else {}
+    previous = json.loads(marker.read_text(encoding='utf-8')) if marker.exists() else {}
     if previous and (previous['source'] != str(root) or previous['board'] != board):
         raise ValueError('Use separate source views for different boards/source trees')
     generated = set()
@@ -90,7 +90,7 @@ def materialize(root, destination, board, tests=False):
             # 生产构建由C编译器选择板型分支；旧主机测试的函数提取器需要预选后的视图。
             # Production uses compiler board guards; legacy host extractors need preselected sources.
             if tests and path.suffix in ('.c', '.h', '.cpp') and 'boards' not in relative.parts and path.name != 'stb_truetype.h':
-                write(relative, select_source(path.read_text(), board).encode())
+                write(relative, select_source(path.read_text(encoding='utf-8'), board).encode())
             else:
                 write(relative, path.read_bytes())
     overlay = root / 'boards' / board / 'src'
@@ -110,7 +110,7 @@ def materialize(root, destination, board, tests=False):
             raise ValueError('Invalid generated-source inventory')
         stale.unlink(missing_ok=True)
     marker.write_text(json.dumps({'source': str(root), 'board': board,
-                                  'files': sorted(generated)}, indent=2) + '\n')
+                                  'files': sorted(generated)}, indent=2) + '\n', encoding='utf-8')
     return destination
 
 

@@ -2,6 +2,11 @@
 
 ## 未发布 / Unreleased
 
+- 两机同步：改进书名、作者与已知来源后缀识别，清理重复作者、译者和冗余宣传尾注；保留原文件及操作完整路径，阅读进度不变。
+  Both boards: refine title/author and known source suffix recognition without renaming files or changing reading progress; file actions retain complete paths.
+- Pico构建对齐现有rc101的字体路径保护、黑白设置开关、白底密码框、可选密码宽限期和标题提示排版；宿主夹具按机型选择，S31电源与显示后端保持独立。
+  Pico builds retain the existingrc101 font-path guard, switches, white PIN prompt, opt-in grace and title notices; host fixtures select the board without replacing S31 power/display backends.
+
 - 两机同步：兼容部分 EPUB 制作工具写入的本地头全零 ZIP64 预留字段，修复小书被误报为资源超限；保留32位尺寸、范围和CRC校验，真正的ZIP64仍不支持。
   Both boards: accept a narrowly validated zero-filled local ZIP64 placeholder without admitting real ZIP64 archives; retain size, range and CRC checks.
 
@@ -183,6 +188,9 @@ User-visible changes by release; see [README](../README.md) for usage.
   S31 shows a local three-second double-press hint after one locked power press, preserving authentication. Volume keys share root side-key navigation/shelf paging while reader and child mappings remain page-owned.
 
 ## 待发布 / Unreleased
+
+- 自动简化Z-Library格式的显示书名和作者：清理来源尾缀、嵌套重复作者、国别与外文别名、明确的译者说明、英文并列长标题及省略号截断的宣传尾注；保留TF原文件名、路径和阅读记录。文件列表不再因128字节名称缓冲而跳过长名，删除兼容书名中的省略号及接近长度上限的文件。
+  Simplify Z-Library display titles/authors, removing source tails, duplicate nested authors, country tags and foreign aliases, explicit translator credits, long parallel English titles and ellipsis-truncated promotion while retaining original SD filenames, paths and reading records. File lists no longer discard names at a128-byte label limit; deletion accepts literal ellipses and files near the filename-length limit.
 
 - 合入 EPUB 特殊章节路径兼容、嵌套目录书籍删除、无标题页面不再补占位名及单幅插图居中；新增插图双指缩放、双击放大与拖动。图片缓存失效和刷新失败可安全重试。
   Accept EPUB colon paths, nested book deletion, unnamed-page titles and lone-image centering. Add pinch/double-tap image zoom and drag, with stale-cache and failed-refresh recovery.
