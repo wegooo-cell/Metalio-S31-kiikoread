@@ -108,21 +108,74 @@ static bool name_author_candidate(name_span_t s) {
 }
 static name_span_t name_author(name_span_t s) {
     s=name_trim(s);
-    // 明确的“著 … 译”只保留作者，英文别名和国别保留。
-    // An explicit authored/translated credit retains the author, English alias and country tag.
+    // 先分离明确的“著 … 译”与重复姓名，再统一清理显示作者。
+    // Separate explicit author/translator credits and duplicate names before display cleanup.
     for(size_t i=0;i+3<=s.n;++i)if(!memcmp(s.p+i,"著",3)&&(i+3==s.n||name_space((unsigned char)s.p[i+3]))){s.n=i;break;}
     s=name_trim(s);name_span_t body;size_t at;
     if(name_group(s,&body,&at)&&at&&name_equal((name_span_t){s.p,at},body))s.n=at;
     return name_trim(s);
 }
+static size_t name_codepoint(name_span_t s,size_t at,unsigned *cp) {
+    const unsigned char *p=(const unsigned char*)s.p+at;size_t left=s.n-at;
+    *cp=p[0];if(p[0]<128)return 1;
+    size_t n=(p[0]&0xe0)==0xc0?2:(p[0]&0xf0)==0xe0?3:(p[0]&0xf8)==0xf0?4:1;
+    if(n==1||n>left){*cp=0xfffd;return 1;}
+    unsigned v=p[0]&((1u<<(7-n))-1u);
+    for(size_t i=1;i<n;++i){if((p[i]&0xc0)!=0x80){*cp=0xfffd;return 1;}v=(v<<6)|(p[i]&63u);}
+    *cp=v;return n;
+}
+static bool name_han(unsigned cp) {
+    return cp==0x3007||(cp>=0x3400&&cp<=0x9fff)||(cp>=0xf900&&cp<=0xfaff)||(cp>=0x20000&&cp<=0x323af);
+}
 static bool name_has_han(name_span_t s) {
-    for(size_t i=0;i+2<s.n;++i){const unsigned char *p=(const unsigned char*)s.p+i;
-        if((p[0]&0xf0)==0xe0&&(p[1]&0xc0)==0x80&&(p[2]&0xc0)==0x80){
-            unsigned cp=((p[0]&15u)<<12)|((p[1]&63u)<<6)|(p[2]&63u);
-            if((cp>=0x3400&&cp<=0x9fff))return true;}
-    }
+    for(size_t i=0;i<s.n;){unsigned cp;i+=name_codepoint(s,i,&cp);if(name_han(cp))return true;}
     return false;
 }
+static size_t name_country_tag(name_span_t s) {
+    static const char *pairs[][2]={{"[","]"},{"【","】"},{"〔","〕"},{"（","）"},{"(",")"}};
+    static const char *countries[]={"英","美","日","法","德","俄","意","加","澳","西","瑞","波","挪","丹","荷","捷","希","比","以","中","奥","苏","印度","南非","阿根廷","哥伦比亚","中国","英国","美国","日本","法国","德国","俄国","俄罗斯","意大利","加拿大","澳大利亚","奥地利","瑞典","挪威","丹麦","荷兰","西班牙","葡萄牙","以色列","UK","US","USA"};
+    for(unsigned k=0;k<sizeof(pairs)/sizeof(*pairs);++k){
+        size_t a=strlen(pairs[k][0]),b=strlen(pairs[k][1]);
+        if(s.n<a+b||memcmp(s.p,pairs[k][0],a))continue;
+        for(size_t i=a;i+b<=s.n&&i<=36;++i)if(!memcmp(s.p+i,pairs[k][1],b)){
+            name_span_t tag=name_trim((name_span_t){s.p+a,i-a});
+            for(unsigned j=0;j<sizeof(countries)/sizeof(*countries);++j)
+                if(tag.n==strlen(countries[j])&&!strncasecmp(tag.p,countries[j],tag.n))return i+b;
+            break;
+        }
+    }
+    return 0;
+}
+
+bool book_author_clean_display(char *author,size_t cap) {
+    if(!author||!cap)return false;
+    size_t n=strnlen(author,cap);if(n==cap){author[0]=0;return false;}
+    name_span_t s=name_author((name_span_t){author,n});name_copy(author,cap,s);
+    s=(name_span_t){author,strlen(author)};size_t out=0;
+    // 去除各类国别括号；没有中文姓名时保留原文姓名，不猜测音译。
+    // Remove country tags; keep the original name when no Chinese name is available, without inventing a translation.
+    for(size_t i=0;i<s.n;){size_t skip=name_country_tag((name_span_t){s.p+i,s.n-i});
+        if(skip){i+=skip;continue;}
+        unsigned cp;size_t width=name_codepoint(s,i,&cp);memmove(author+out,s.p+i,width);out+=width;i+=width;
+    }
+    author[out]=0;s=name_trim((name_span_t){author,out});name_copy(author,cap,s);
+    s=(name_span_t){author,strlen(author)};if(!name_has_han(s))return false;
+    // 中文名存在时只留汉字、姓名间点及多个作者的分隔符；外文别名不进入显示层。
+    // With a Chinese name present, retain Han, name dots and author separators; exclude foreign aliases from display.
+    out=0;char pending[4];size_t pending_n=0;
+    for(size_t i=0;i<s.n;){unsigned cp;size_t width=name_codepoint(s,i,&cp);
+        if(name_han(cp)){
+            if(out&&pending_n){memcpy(author+out,pending,pending_n);out+=pending_n;}
+            pending_n=0;memmove(author+out,s.p+i,width);out+=width;
+        }else if(out&&(cp==0xb7||cp==0x30fb||cp==0x2022||cp==0x3001||cp==0xff0c||cp==','||cp==';'||cp=='/'||cp=='-')){
+            if(cp==0x30fb||cp==0x2022){memcpy(pending,"·",2);pending_n=2;}
+            else{memcpy(pending,s.p+i,width);pending_n=width;}
+        }
+        i+=width;
+    }
+    author[out]=0;return out>0;
+}
+
 static name_span_t name_library_title(name_span_t s) {
     // Zlib常把英语原名追加在“ = ”后；中文副标题、卷次和普通文件名保留。
     // Zlib often appends an English parallel title after " = "; retain Chinese subtitles, volumes and ordinary filenames.
@@ -130,10 +183,13 @@ static name_span_t name_library_title(name_span_t s) {
         name_span_t a=name_trim((name_span_t){s.p,i}),b=name_trim((name_span_t){s.p+i+1,s.n-i-1});
         if(name_has_han(a)&&b.n&&!name_has_han(b)&&((b.p[0]>='A'&&b.p[0]<='Z')||(b.p[0]>='a'&&b.p[0]<='z'))){s=a;break;}
     }
-    // 仅去已识别来源中的长宣传尾注；短版本/卷次说明不动。
-    // Remove only long promotional tail notes under a recognized source; preserve short edition/volume labels.
-    for(size_t i=0;i+6<s.n;++i)if(!memcmp(s.p+i,"【",3)&&s.n-i>=48&&!memcmp(s.p+s.n-3,"】",3)){
+    // 已识别来源中的长宣传尾注可闭合，也可被省略号截断；短版本/卷次说明不动。
+    // Source-confirmed long promotional notes may be closed or ellipsis-truncated; preserve short edition/volume labels.
+    for(size_t i=0;i+6<s.n;++i)if(!memcmp(s.p+i,"【",3)&&s.n-i>=48){
         name_span_t note={s.p+i,s.n-i};
+        bool closed=!memcmp(s.p+s.n-3,"】",3);
+        bool truncated=(!memcmp(s.p+s.n-3,"...",3)||!memcmp(s.p+s.n-3,"…",3))&&!name_contains(note,"】");
+        if(!closed&&!truncated)continue;
         if(name_contains(note,"获奖")||name_contains(note,"畅销")||name_contains(note,"读者")||name_contains(note,"文学奖")){s.n=i;break;}
     }
     return name_trim(s);
@@ -161,11 +217,7 @@ bool book_name_from_path(const char *path,char *title,size_t title_cap,char *aut
     }
     if(!s.n)return false;
     name_copy(author,author_cap,auth);
-    if(author&&author_cap&&author[0]=='['){
-        char *end=strchr(author,']');
-        if(end&&end-author<=16){char *next=end+1;while(name_space((unsigned char)*next))++next;
-            if(next!=end+1)memmove(end+1,next,strlen(next)+1);}
-    }
+    (void)book_author_clean_display(author,author_cap);
     return name_copy(title,title_cap,s)>0;
 }
 

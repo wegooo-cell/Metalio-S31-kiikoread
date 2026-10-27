@@ -262,7 +262,9 @@ static void scan_books(void) {
         char metadata_title[128],metadata_author[128];
         if (book_epub_metadata_cached(b->path,metadata_title,sizeof(metadata_title),metadata_author,sizeof(metadata_author))==ESP_OK) {
             if(metadata_title[0])copy_title(b->title,sizeof(b->title),metadata_title);
-            if(metadata_author[0])copy_title(b->author,sizeof(b->author),metadata_author);
+            bool chinese=book_author_clean_display(metadata_author,sizeof(metadata_author));
+            if(metadata_author[0]&&(chinese||!book_author_clean_display(b->author,sizeof(b->author))))
+                copy_title(b->author,sizeof(b->author),metadata_author);
         }
     }
     home_book_t *featured = s_current.path[0] ? &s_current : &s_recent[0];
@@ -272,7 +274,9 @@ static void scan_books(void) {
         if (book_epub_metadata(featured->path, metadata_title, sizeof(metadata_title),
                                metadata_author, sizeof(metadata_author)) == ESP_OK) {
             if(metadata_title[0])copy_title(featured->title,sizeof(featured->title),metadata_title);
-            if(metadata_author[0])copy_title(featured->author,sizeof(featured->author),metadata_author);
+            bool chinese=book_author_clean_display(metadata_author,sizeof(metadata_author));
+            if(metadata_author[0]&&(chinese||!book_author_clean_display(featured->author,sizeof(featured->author))))
+                copy_title(featured->author,sizeof(featured->author),metadata_author);
         }
     }
 }

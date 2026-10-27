@@ -189,6 +189,7 @@ static bool book_title_get(const char* path,char* out,size_t cap){(void)path;(vo
 static void book_title_clean_import(char* title){(void)title;}
 static bool book_title_from_path(const char* path,char* out,size_t cap){const char* name=strrchr(path,'/');name=name?name+1:path;size_t n=strlen(name);const char* dot=strrchr(name,'.');if(dot)n=(size_t)(dot-name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;return n>0;}
 static bool book_name_from_path(const char*p,char*t,size_t n,char*a,size_t z){if(a&&z)a[0]=0;return book_title_from_path(p,t,n);}
+static bool book_author_clean_display(char*a,size_t n){(void)a;(void)n;return false;}
 static void clean_filename(char* out,size_t cap,const char* name){size_t n=strlen(name);if(n>=cap)n=cap-1;memcpy(out,name,n);out[n]=0;}
 typedef struct pending_progress {char path[288];book_progress_t value;bool dirty,progress_saved;book_progress_watch_t* watch;struct pending_progress* next;} pending_progress_t;
 static pending_progress_t* s_pending;

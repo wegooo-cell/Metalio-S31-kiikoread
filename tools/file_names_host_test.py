@@ -61,8 +61,8 @@ static bool shelf_reserve(void){return true;}
 static bool book_progress_load(const char*p,uint32_t z,book_progress_t*out){(void)p;(void)z;(void)out;return false;}
 static char s_query[16];
 static bool read_pico_search_match(const char*t,const char*q){(void)t;(void)q;return true;}
-static unsigned metadata_calls;static bool have_metadata;
-static int book_epub_metadata_cached(const char*p,char*t,size_t n,char*a,size_t z){(void)p;(void)n;++metadata_calls;t[0]=0;snprintf(a,z,"%s",have_metadata?"Cached author":"");return have_metadata?0:-1;}
+static unsigned metadata_calls;static bool have_metadata;static const char *cached_author="Cached author";
+static int book_epub_metadata_cached(const char*p,char*t,size_t n,char*a,size_t z){(void)p;(void)n;++metadata_calls;t[0]=0;snprintf(a,z,"%s",have_metadata?cached_author:"");return have_metadata?0:-1;}
 typedef struct{int favorites,hidden;bool truncated;}shelf_backfill_t;
 '''+shelf_type+'\nstatic shelf_entry_t s_shelf[8];static int shelf_count,shelf_view;\n'
 for name in ['copy_text','clean_filename','scan_shelf_dir','shelf_backfill_visit']:
@@ -82,20 +82,22 @@ int main(void){
  bool truncated=false,unreadable=false,skipped=false;app_ctx_t ctx={0};
  scan_shelf_dir(&ctx,folder,false,0,0,&truncated,&unreadable,&skipped);
  assert(shelf_count==4&&!truncated&&!unreadable&&!skipped&&metadata_calls==4);
- for(int i=0;i<shelf_count;++i)if(strstr(s_shelf[i].path,"活山"))assert(!strcmp(s_shelf[i].name,"活山")&&!strcmp(s_shelf[i].author,"[英]娜恩·谢泼德"));
+ for(int i=0;i<shelf_count;++i)if(strstr(s_shelf[i].path,"活山"))assert(!strcmp(s_shelf[i].name,"活山")&&!strcmp(s_shelf[i].author,"娜恩·谢泼德"));
  shelf_count=0;shelf_backfill_t backfill={0};book_progress_t progress={.file_size=7};
  snprintf(path,sizeof(path),"%s/%s",folder,names[0]);
- assert(shelf_backfill_visit(path,&progress,&backfill)&&shelf_count==1&&!strcmp(s_shelf[0].name,"沉睡的人")&&strstr(s_shelf[0].author,"Georges Perec"));
- shelf_count=0;have_metadata=true;assert(shelf_backfill_visit(path,&progress,&backfill)&&!strcmp(s_shelf[0].author,"Cached author"));
- home_book_t current={0};snprintf(current.path,sizeof(current.path),"%s/%s",folder,names[1]);title_for(&current);assert(!strcmp(current.title,"活山")&&!strcmp(current.author,"[英]娜恩·谢泼德"));
+ assert(shelf_backfill_visit(path,&progress,&backfill)&&shelf_count==1&&!strcmp(s_shelf[0].name,"沉睡的人")&&!strcmp(s_shelf[0].author,"乔治·佩雷克"));
+ shelf_count=0;have_metadata=true;assert(shelf_backfill_visit(path,&progress,&backfill)&&!strcmp(s_shelf[0].author,"乔治·佩雷克"));
+ shelf_count=0;cached_author="【英】乔治·佩雷克 (Georges Perec)";
+ assert(shelf_backfill_visit(path,&progress,&backfill)&&!strcmp(s_shelf[0].author,"乔治·佩雷克"));
+ home_book_t current={0};snprintf(current.path,sizeof(current.path),"%s/%s",folder,names[1]);title_for(&current);assert(!strcmp(current.title,"活山")&&!strcmp(current.author,"娜恩·谢泼德"));
 
  bool saw_long=false;
  for(int i=0;i<s_count;++i){
   file_item_t item=s_files[i];char before[288],title[128],author[128];strcpy(before,item.path);
   file_display_name(&item,title,author);assert(!strcmp(before,item.path));
   assert(!strcmp(file_item_name(&item),strrchr(before,'/')+1));
-  if(strstr(item.path,"活山"))assert(!strcmp(title,"活山")&&!strcmp(author,"[英]娜恩·谢泼德"));
-  if(strstr(item.path,"我们为何"))assert(!strcmp(title,"我们为何迷恋真实")&&strstr(author,"Emily Bootle")&&!strstr(author,"马雅"));
+  if(strstr(item.path,"活山"))assert(!strcmp(title,"活山")&&!strcmp(author,"娜恩·谢泼德"));
+  if(strstr(item.path,"我们为何"))assert(!strcmp(title,"我们为何迷恋真实")&&!strcmp(author,"埃米莉·布特尔"));
   if(strlen(file_item_name(&item))==255){saw_long=true;assert(strlen(title)==127);}
   struct stat st;assert(!stat(item.path,&st));
   assert(file_tree_delete(item.path,NULL,NULL)==0);assert(stat(item.path,&st)!=0);

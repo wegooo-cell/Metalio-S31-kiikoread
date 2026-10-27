@@ -22,3 +22,7 @@ void book_title_clean_import(char *title);
 /// 有界文件名识别，不做IO；作者可为空，识别不确定时保留去扩展名的原名。
 /// Bounded filename parsing with no IO; author may be NULL and uncertain names keep their original stem.
 bool book_name_from_path(const char *path,char *title,size_t title_cap,char *author,size_t author_cap);
+
+/// 清理显示作者的国别和外文别名；返回是否有中文名，无中文名保留原文，不修改缓存源。
+/// Remove country tags/foreign aliases for display; return whether Chinese remains, keeping original names when none exists.
+bool book_author_clean_display(char *author,size_t cap);
