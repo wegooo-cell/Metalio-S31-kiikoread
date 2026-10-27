@@ -45,14 +45,12 @@ void app_settings_set_staged_shutdown(bool staged);
 /// Power-key boot presses: 1 boots on a single press, 2 needs a double click; defaults to 1 and retains an explicit saved choice.
 uint8_t app_settings_wake_presses(void);
 void app_settings_set_wake_presses(uint8_t presses);
-#if KIIKO_BOARD_METALIO47
 /// 可选密码宽限期0/5/60/480/1440分钟，默认关闭。/ Optional PIN grace0/5/60/480/1440min, off by default.
 uint8_t app_settings_pin_grace_code(void);
 void app_settings_set_pin_grace_code(uint8_t code);
 unsigned app_settings_pin_grace_minutes(void);
 uint32_t app_settings_pin_locked_at(void);
 void app_settings_record_pin_lock(uint32_t unix_seconds);
-#endif
 /// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);
