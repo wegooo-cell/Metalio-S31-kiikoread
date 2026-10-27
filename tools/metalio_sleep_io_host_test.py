@@ -20,6 +20,7 @@ typedef int esp_err_t;
 #define TTF_FONT_SLOTS 4
 typedef struct {int f_fd;bool f_io_suspended,f_io_ready,f_ready;off_t f_io_position;struct stat f_io_stat;char f_path[512];unsigned cached_glyphs;void *image;} ttf_slot_t;
 static ttf_slot_t s_slots[TTF_FONT_SLOTS];
+static int s_cur_index;
 static void ttf_font_slots_init(void){}
 typedef struct {FILE *file;bool io_suspended;struct stat io_stat;unsigned count;} zip_reader_t;
 static void zip_prefetch_clear(zip_reader_t *z){(void)z;}
@@ -59,6 +60,11 @@ int main(void){
  assert(ttf_font_suspend_io()==ESP_OK);assert(!unlink(first));
  assert(ttf_font_resume_io()!=ESP_OK&&!s_slots[0].f_ready&&!s_slots[1].f_ready);
  fill(first);assert(ttf_font_resume_io()==ESP_OK&&s_slots[0].f_ready&&s_slots[1].f_ready);
+ // An unavailable idle face must not block a valid active one; keep its saved path suspended.
+ assert(ttf_font_suspend_io()==ESP_OK);strcpy(s_slots[1].f_path,"/missing-idle-font.ttf");
+ assert(ttf_font_resume_io()==ESP_OK&&s_slots[0].f_ready&&!s_slots[1].f_ready&&s_slots[1].f_io_suspended);
+ strcpy(s_slots[1].f_path,first);s_cur_index=1;
+ assert(ttf_font_resume_io()==ESP_OK&&s_slots[1].f_ready);
  for(int i=0;i<2;i++)close(s_slots[i].f_fd);
  zip_reader_t z={.file=fopen(second,"rb"),.count=5000};assert(z.file);
  assert(zip_suspend_io(&z)==ESP_OK&&!z.file&&z.count==5000);

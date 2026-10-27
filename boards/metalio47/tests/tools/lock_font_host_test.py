@@ -18,6 +18,8 @@ static unsigned s_rejected_attempts;
 static int64_t esp_timer_get_time(void){return clock_us;}
 static unsigned transient_failures;
 static bool media_ready=true;
+static bool wake_pending;
+static bool app_sleep_media_pending(void){return wake_pending;}
 static bool read_pico_sd_io_ready(void){return media_ready;}
 #include <stdbool.h>
 #include <stdio.h>
@@ -76,7 +78,10 @@ int main(void){
  strcpy(active,reader);s_reading=true;media_ready=false;unsigned paused=opens;
  app_font_begin_lock(&saved);app_font_end_lock(&saved);
  assert(opens==paused&&!strcmp(active,reader)&&s_reading);
- media_ready=true;strcpy(active,"builtin");s_reading=false;
+ // Cached mount success must not bypass an outstanding wake recovery transaction.
+ media_ready=true;wake_pending=true;strcpy(active,reader);s_reading=true;paused=opens;
+ app_font_begin_lock(&saved);app_font_end_lock(&saved);assert(opens==paused&&!strcmp(active,reader));
+ wake_pending=false;strcpy(active,"builtin");s_reading=false;
  // 缺失字体可重复尝试，但不会重载内建或报告变化。/ Retry missing fonts without reloading built-in or reporting changes.
  strcpy(missing,chosen);unsigned first=opens;
  assert(!app_font_activate_system()&&ttf_font_is_builtin()&&opens==first);

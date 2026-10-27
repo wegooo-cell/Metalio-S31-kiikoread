@@ -28,6 +28,8 @@ bool metalio_key_down(void);
 bool metalio_confirm_power_key(void);
 /// 深睡启动硬件初始化时确认的真实按键。/ Real key confirmed early during deep-boot hardware initialization.
 bool metalio_boot_power_key(void);
+/// Consume optional one-use bootloader P17 evidence before loading UI/media.
+void metalio_capture_boot_power_key(void);
 int metalio_take_volume(void);
 /// 官方AI/BOOT输入GPIO61，25ms去抖、500ms长按；长按抬手不触发短按。
 /// Vendor AI/BOOT input GPIO61,25ms debounce and500ms hold; release after a hold never produces a tap.

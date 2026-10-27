@@ -98,6 +98,8 @@
 #if KIIKO_BOARD_METALIO47
 #include "metalio_hw.h"
 #include "ui_ai_menu.h"
+#include "book/book_source.h"
+#include "online_font.h"
 #else
 #endif
 #include "local_latency_probe.h"
@@ -823,11 +825,44 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 #if KIIKO_BOARD_METALIO47
     if (app_sd_recovery_busy()) return false;
     static bool wake_pending;
-    if (!app_sleep_media_ready()) { wake_pending=true; return false; }
+    static bool wake_consumers_closed;
+    if (!app_sleep_media_ready()) {
+        wake_pending=true;
+        // 挂卡优先：字体/书籍恢复失败时仍让健康检查运行；挂载任务期间不抢生命周期。
+        // Media comes first: failed reopen must not suppress health checks or steal a mount task.
+        if (usb_storage_active() || pico_online_busy() || app_download_active()) return false;
+        read_pico_transfer_status_t owner={0};
+        online_font_status_t download={0};
+        read_pico_transfer_get_status(&owner);
+        online_font_status(&download);
+        if (owner.state != READ_PICO_TRANSFER_STOPPED || download.busy) return false;
+        read_pico_sd_poll_health();
+        if (!app_sleep_media_failed()) return false;
+        bool covers=book_cover_jobs_quiesce(0), avatar=ui_avatar_quiesce(0);
+        if (!covers || !avatar) return false;
+        bool changed=!wake_consumers_closed;
+        if (changed) {
+            // 部分句柄可能已恢复，必须全部释放，不能带着旧VFS句柄重挂。
+            // Partial resumes may own live descriptors: close all before replacing the VFS session.
+            if (current->on_media_lost) current->on_media_lost(ctx);
+            book_close();ttf_font_close_embedded();ttf_font_unload();
+            (void)ttf_font_open_builtin();ui_text_set_system_font(false);
+            ui_avatar_invalidate();book_lock_collage_invalidate();
+            *mounted=false;*invalidated=true;
+            wake_consumers_closed=true;
+        }
+        if (read_pico_sd_invalidate_io() == ESP_OK) {
+            app_sleep_discard_media_io();
+            wake_consumers_closed=false;
+            s_media_recovery_after_ms=0;s_media_recovery_attempts=0;
+        }
+        return changed;
+    }
     // 句柄恢复不一定改变挂载/字体路径，也必须补一次完整页面。
     // Resuming handles may leave mount/font identity unchanged; still repaint the page once.
     bool wake_restored=wake_pending;
     wake_pending=false;
+    wake_consumers_closed=false;
 #endif
     if (usb_storage_active()) {
         s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0;
@@ -852,6 +887,9 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
     if (ready) { s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0; }
     if (gained || lost) { ui_avatar_invalidate(); (void)book_cover_jobs_quiesce(0); book_lock_collage_invalidate(); }
     if (gained && current->on_media_ready) current->on_media_ready(ctx);
+#if KIIKO_BOARD_METALIO47
+    bool font_restored=gained && app_font_recover_media();
+#endif
     if (!lost) {
         if (!ready) recover_media(ctx,&info);
 #if KIIKO_BOARD_METALIO47
@@ -860,8 +898,10 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
             if(!gained && current->on_media_ready)current->on_media_ready(ctx);
             return true;
         }
-#endif
+        return font_restored;
+#else
         return false;
+#endif
     }
     *invalidated = true;
     if (current->on_media_lost) current->on_media_lost(ctx);
@@ -875,6 +915,9 @@ static bool poll_media(app_ctx_t* ctx, const app_desc_t* current,
 // 锁屏前先由页面保存进度，再持久化一次恢复上下文；不在翻页或点击时写入。
 // Flush page progress before persisting one lock checkpoint; never write it on page turns or taps.
 static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedback) {
+#if KIIKO_BOARD_METALIO47
+    const int64_t started_at = esp_timer_get_time();
+#endif
     if (feedback) app_lock_feedback(ctx->hl);
     if (current->on_before_lock) current->on_before_lock(ctx);
     int tab = app_index_of(current);
@@ -886,6 +929,8 @@ static void prepare_lock(app_ctx_t *ctx, const app_desc_t *current, bool feedbac
     }
 #if KIIKO_BOARD_METALIO47
     app_lock_set_resume_ready(pico_boot_save_resume(&resume) == ESP_OK);
+    ESP_LOGI(TAG, "S31 lock checkpoint_ms=%lld", (long long)((esp_timer_get_time() - started_at) / 1000));
+    (void)started_at;
 #else
     (void)pico_boot_save_resume(&resume);
 #endif
@@ -1261,7 +1306,14 @@ void app_loop_run(const app_loop_config_t* config) {
                     if (menu_open) present_menu(&ctx, current, menu_leaf, &feedback);
                     else app_present(&ctx, current, APP_REDRAW_PAGE);
                 } else if (action == UI_POWER_ACTION_SHUTDOWN) {
-                    if (!app_settings_staged_shutdown()) {
+#if KIIKO_BOARD_METALIO47
+                    // 明确的滑动关机始终断电；锁屏的延时策略不能把关机变成待机。
+                    // An explicit shutdown always powers off; lock policy must not turn it into standby.
+                    const bool staged_shutdown=false;
+#else
+                    const bool staged_shutdown=app_settings_staged_shutdown();
+#endif
+                    if (!staged_shutdown) {
                         power_dialog_open = false;
                         ui_power_dialog_end();
                         ui_power_dialog_reset(&power_dialog, false);

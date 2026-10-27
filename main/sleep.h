@@ -31,6 +31,10 @@ typedef enum {
 #if KIIKO_BOARD_METALIO47
 /// 解锁后继续浅睡媒体恢复，未完成时保留挂起的字体/书籍句柄。/ Continue light-sleep media recovery after unlock, retaining pending font/book handles.
 bool app_sleep_media_ready(void);
+/// 卡恢复优先：有界重开失败后，由主循环释放消费者并安排重挂。/ Yield failed reopen to loop-owned card recovery.
+bool app_sleep_media_failed(void);
+/// 无I/O快照，阻止其他字体入口绕过恢复顺序。/ IO-free snapshot protecting the media-before-font ordering.
+bool app_sleep_media_pending(void);
 /// Only after closing all book/font slots: replace pending wake IO with a manual recovery transaction.
 void app_sleep_discard_media_io(void);
 /// 主动拼贴锁屏先灭灯并显示圆锁，保留后续短按。/ Manual collage feedback retains later wake clicks.

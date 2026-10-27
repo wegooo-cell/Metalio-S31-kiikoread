@@ -95,6 +95,10 @@ def export(build, output, board):
     experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text()
     experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text()
     transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text()
+    config_header=build/'config/sdkconfig.h'
+    early_key=board=='metalio47' and config_header.exists() and '#define CONFIG_METALIO_EARLY_POWER_KEY 1' in config_header.read_text()
+    if early_key and (len((build/'bootloader/bootloader.bin').read_bytes())>0x6000):
+        raise ValueError('S31 early-key bootloader exceeds the existing 0x2000..0x8000 region')
     manifest = {'name': info['name'], 'version': identity['version'], 'board': board,
                 'experimental_pie_pixels': bool(experimental_pie),
                 'experimental_text_ripple': bool(experimental_ripple),
@@ -103,6 +107,8 @@ def export(build, output, board):
                 'experimental_fast_reader_panels': bool(experimental_fast_panels),
                 'experimental_network_probe': bool(experimental_network),
                 'local_transfer_start_test': bool(transfer_start),
+                'experimental_early_power_key': bool(early_key),
+                'requires_bootloader_update': bool(early_key),
                 'project': identity['project'], 'new_install_prompt_erase': False,
                 'builds': [{'chipFamily': 'ESP32-S3' if board == 'pico' else 'ESP32-S31', 'parts': []}]}
     checksums, args = [], [shlex.join(plan['write_flash_args'])]
@@ -126,7 +132,8 @@ def export(build, output, board):
     (output / '使用说明.txt').write_text(
         f"本地测试固件 / {info['name']} / {info['idf_target']} / {identity['version']}\n"
         "只用于对应设备，不可跨板型刷写。应用Bin仅用于已有正确分区的升级，不可写到地址0。\n"
-        "完整初装地址见flash_args，保留数据时不要全片擦除。当前工具只编译，不会连接或刷写设备。\n")
+        "完整初装地址见flash_args，保留数据时不要全片擦除。当前工具只编译，不会连接或刷写设备。\n" +
+        ("本实验需要配套应用及引导程序；仅写应用无法修复短按开机，不能按普通TF/OTA更新处理。\n" if early_key else ""))
     result = {'board': board, 'target': info['idf_target'], **identity,
               'partitions': entries, 'bootloader_offset': expected_offsets['bootloader'],
               'esptool_stub': loader['stub'], 'free_app_bytes': entries['ota_0'][3] - identity['size'],
@@ -137,6 +144,8 @@ def export(build, output, board):
               'experimental_fast_reader_panels': bool(experimental_fast_panels),
               'experimental_network_probe': bool(experimental_network),
               'local_transfer_start_test': bool(transfer_start),
+              'experimental_early_power_key': bool(early_key),
+              'requires_bootloader_update': bool(early_key),
               'built': True, 'device_flashed': False, 'published': False}
     (output / 'verification.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
     with zipfile.ZipFile(output.parent / f"kiikoread-{board}-{identity['version']}-USB.zip", 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -171,10 +180,24 @@ def build_one(board, args):
                '-DMETALIO_NETWORK_PROBE=' + ('ON' if board == 'metalio47' and args.s31_network_probe else 'OFF'),
                '-DMETALIO_LOCAL_TRANSFER_START=' + ('ON' if board == 'metalio47' and getattr(args, 's31_transfer_startup_test', False) else 'OFF'),
                'reconfigure', 'build']
+    early_key=board=='metalio47' and getattr(args,'s31_early_power_key',False)
+    if board=='metalio47':
+        for index,value in enumerate(command):
+            if value.startswith('-DSDKCONFIG_DEFAULTS='):
+                command[index]=value+';'+str(source/'.kiiko-early-key.defaults')
     if args.dry_run:
-        print(json.dumps({'board': board, 'sdk': str(sdk), 'command': command}, ensure_ascii=False))
+        print(json.dumps({'board': board, 'sdk': str(sdk), 'experimental_early_power_key':early_key, 'command': command}, ensure_ascii=False))
         return None
     materialize(ROOT, source, board)
+    if board=='metalio47':
+        # Only a private feature flag; SDK RTC reserve sizes/ABI remain unchanged.
+        path=work/'sdkconfig'
+        keys={'CONFIG_METALIO_EARLY_POWER_KEY':'y' if early_key else 'n'}
+        settings='\n'.join(key+'='+value for key,value in keys.items())+'\n'
+        (source/'.kiiko-early-key.defaults').write_text(settings)
+        if path.exists():
+            lines=[line for line in path.read_text().splitlines() if not any(line.startswith(key+'=') or line=='# '+key+' is not set' for key in keys)]
+            path.write_text('\n'.join(lines)+'\n'+settings)
     if board == 'metalio47' and (work / 'sdkconfig').exists():
         # 旧缓存不能关闭S31供屏的缓存安全保证；其余选项保留。/ Migrate old S31 caches to cache-safe feeding, retaining every unrelated option.
         path = work / 'sdkconfig'
@@ -245,6 +268,7 @@ def main():
     parser.add_argument('--s31-fast-reader-panels', action='store_true', help='Explicit local four-gray16 font/reading settings experiment')
     parser.add_argument('--s31-network-probe', action='store_true', help='Local S31 read-only radio counters; not a delivery default')
     parser.add_argument('--s31-transfer-startup-test', action='store_true', help='Unattended local S31 transfer startup; never deliver')
+    parser.add_argument('--s31-early-power-key', action='store_true', help='Local S31 bootloader P17 capture experiment; requires a matched bootloader and application')
     args = parser.parse_args()
     args.board = canonical_board(args.board)
     if args.s31_pie and args.board == 'pico':
@@ -261,6 +285,8 @@ def main():
         parser.error('--s31-network-probe requires metalio47 or all')
     if args.s31_transfer_startup_test and args.board == 'pico':
         parser.error('--s31-transfer-startup-test requires metalio47 or all')
+    if args.s31_early_power_key and args.board=='pico':
+        parser.error('--s31-early-power-key requires metalio47 or all')
     boards = BOARDS if args.board == 'all' else (args.board,)
     if args.list:
         print(json.dumps([metadata(board) for board in boards], ensure_ascii=False, indent=2))

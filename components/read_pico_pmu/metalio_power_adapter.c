@@ -109,13 +109,15 @@ esp_err_t read_pico_pmu_keys_pause(void) {
 }
 void read_pico_pmu_keys_resume(void) {
     metalio_ai_clear();
-    // 按原厂等待输入稳定；丢弃改方向造成的假边沿，不丢真实按键队列。
-    // Follow the vendor input-settle delay; discard direction-change edges, retaining real queued keys.
+    // 改方向后须两次稳定低电平才承接按住；单次毛刺/读错不能在松开时伪造解锁。
+    // Require two stable low samples after direction restore; a glitch/read fault must not synthesize an unlock on release.
     vTaskDelay(pdMS_TO_TICKS(20));
     uint16_t inputs=0xffff; bool valid=metalio_io_read(&inputs)==ESP_OK;
+    vTaskDelay(pdMS_TO_TICKS(30));
+    uint16_t again=0xffff; bool valid_again=metalio_io_read(&again)==ESP_OK;
     int64_t now=esp_timer_get_time()/1000;
     portENTER_CRITICAL(&key_lock);
-    held=candidate=valid && !(inputs&(1u<<15));
+    held=candidate=valid && valid_again && !(inputs&(1u<<15)) && !(again&(1u<<15));
     down_since=candidate_since=now; long_sent=false;
     state.key_state=held?1:0;
     ++key_epoch; keys_paused=false;

@@ -53,7 +53,13 @@
 
 #define FILE_MAX 96
 #define FILE_ROWS 9
-typedef struct { char path[288]; char name[128]; off_t size; bool is_dir; } file_item_t;
+typedef struct { char path[288]; off_t size; bool is_dir; } file_item_t;
+// 完整路径是文件身份；名称从末段取得，UI截短不能把长中文文件过滤掉或改写实际操作目标。
+// Full paths identify entries; derive the leaf so shortened UI labels cannot hide or redirect long filenames.
+static const char *file_item_name(const file_item_t *item) {
+    const char *slash = strrchr(item->path, '/');
+    return slash ? slash + 1 : item->path;
+}
 // 文件列表放 PSRAM：内部 RAM 已被静态占用到约 90%，而 BLE 控制器只能用内部 RAM，
 // 列表这类大数组没必要跟它抢。
 // The file list lives in PSRAM. Internal RAM is already around 90% statically used and the BLE
@@ -215,12 +221,12 @@ static void migrate_book_state(const char *old_path, const char *new_path, uint3
 }
 
 static esp_err_t copy_selected_item(char out_name[128]) {
-    const char *dot = s_selected.is_dir ? NULL : strrchr(s_selected.name, '.');
-    size_t stem_len = dot && dot != s_selected.name ? (size_t)(dot - s_selected.name) : strlen(s_selected.name);
-    char stem[100], candidate[128], destination[288];
-    if (stem_len >= sizeof(stem)) stem_len = sizeof(stem) - 1;
-    memcpy(stem, s_selected.name, stem_len); stem[stem_len] = 0;
-    const char *ext = dot && dot != s_selected.name ? dot : "";
+    const char *name = file_item_name(&s_selected);
+    const char *dot = s_selected.is_dir ? NULL : strrchr(name, '.');
+    size_t stem_len = dot && dot != name ? (size_t)(dot - name) : strlen(name);
+    char stem[288], candidate[288], destination[288];
+    memcpy(stem, name, stem_len); stem[stem_len] = 0;
+    const char *ext = dot && dot != name ? dot : "";
     for (int number = 1; number < 100; ++number) {
         int used = number == 1 ? snprintf(candidate, sizeof(candidate), "%s 副本%s", stem, ext) :
             snprintf(candidate, sizeof(candidate), "%s 副本 %d%s", stem, number, ext);
@@ -359,7 +365,8 @@ static app_redraw_t move_selected(void) {
         snprintf(s_message, sizeof(s_message), "TF 卡不可用"); return APP_REDRAW_PAGE;
     }
     char destination[288];
-    if (snprintf(destination, sizeof(destination), "%s/%s", s_dir, s_selected.name) >= sizeof(destination)) {
+    int path_len = snprintf(destination, sizeof(destination), "%s/%s", s_dir, file_item_name(&s_selected));
+    if (path_len < 0 || (size_t)path_len >= sizeof(destination)) {
         snprintf(s_message, sizeof(s_message), "目标路径过长"); return APP_REDRAW_PAGE;
     }
     if (!strcmp(destination, s_selected.path)) {
@@ -398,7 +405,7 @@ static bool supported(int folder, const char *name) {
 static int compare_files(const void *left, const void *right) {
     const file_item_t *a = left, *b = right;
     if (a->is_dir != b->is_dir) return a->is_dir ? -1 : 1;
-    return strcasecmp(a->name, b->name);
+    return strcasecmp(file_item_name(a), file_item_name(b));
 }
 
 static void scan_folder(int folder) {
@@ -414,7 +421,8 @@ static void scan_folder(int folder) {
     while (s_count < FILE_MAX && (entry = readdir(dir))) {
         if (entry->d_name[0] == '.' || !strncmp(entry->d_name, "._", 2)) continue;
         file_item_t *item = &s_files[s_count];
-        if (snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name) >= sizeof(item->path)) continue;
+        int path_len = snprintf(item->path, sizeof(item->path), "%s/%s", root, entry->d_name);
+        if (path_len < 0 || (size_t)path_len >= sizeof(item->path)) continue;
         struct stat st;
         bool is_dir = false, is_file = false;
         if (!stat(item->path, &st)) {
@@ -428,8 +436,6 @@ static void scan_folder(int folder) {
         if (!is_dir && !is_file) continue;
         if (s_view == FILE_VIEW_MOVE && !is_dir) continue;
         if (folder != 3 && (!is_file || !supported(folder, entry->d_name))) continue;
-        if (strnlen(entry->d_name, sizeof(item->name)) >= sizeof(item->name)) continue;
-        strcpy(item->name, entry->d_name);
         item->is_dir = is_dir;
         ++s_count;
     }
@@ -494,11 +500,11 @@ static void fit_name(char *name, int px, int width) {
 
 
 static void editor_start(void) {
-    if (strlen(s_selected.name) >= sizeof(s_editor)) {
+    if (strlen(file_item_name(&s_selected)) >= sizeof(s_editor)) {
         snprintf(s_message, sizeof(s_message), "名称过长，无法在设备上编辑");
         return;
     }
-    copy_utf8(s_editor, sizeof(s_editor), s_selected.name);
+    copy_utf8(s_editor, sizeof(s_editor), file_item_name(&s_selected));
     s_editor_ext[0] = 0;
     char *dot = strrchr(s_editor, '.');
     if (!s_selected.is_dir && dot && dot != s_editor) {
@@ -525,7 +531,7 @@ static void render_actions(uint8_t *fb) {
     file_card_border(fb, sheet, 28);
     ui_fill_round_rect(fb, (EpdRect){604, 454+offset, 38, 38}, 19, 0xe0);
     ui_text_vc(fb, 623, 473+offset, 24, "×", EPD_DRAW_ALIGN_CENTER, false);
-    char name[128]; copy_utf8(name, sizeof(name), s_selected.name); fit_name(name, 28, 540);
+    char name[128]; copy_utf8(name, sizeof(name), file_item_name(&s_selected)); fit_name(name, 28, 540);
     file_icon(fb, 48, 467+offset, s_selected.is_dir);
     ui_text(fb, 102, 462+offset, 28, name, EPD_DRAW_ALIGN_LEFT, false);
     char detail[48]; file_detail(detail, sizeof(detail), &s_selected);
@@ -621,7 +627,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             int index = s_page * visible_rows() + row;
             if (index >= s_count) break;
             int y = 214 + row * 88;
-            char name[128]; snprintf(name, sizeof(name), "%s", s_files[index].name);
+            char name[128]; copy_utf8(name, sizeof(name), file_item_name(&s_files[index]));
             while (*name && ttf_text_width_px(ui_text_effective_px(23), name) > 450) {
                 size_t n = strlen(name) - 1;
                 while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
@@ -701,7 +707,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             if (index >= s_count) break;
             int y = 520 + row * 91;
             if (row) file_rule(fb, 96, y, 532);
-            char name[128]; copy_utf8(name, sizeof(name), s_files[index].name); fit_name(name, 23, 430);
+            char name[128]; copy_utf8(name, sizeof(name), file_item_name(&s_files[index])); fit_name(name, 23, 430);
             file_icon(fb, 52, y + 24, s_files[index].is_dir);
             if (s_files[index].is_dir)
                 ui_text_vc(fb, 101, y + 46, 23, name, EPD_DRAW_ALIGN_LEFT, false);
@@ -807,7 +813,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
 }
 
 static void open_selected(app_ctx_t *ctx) {
-    const char *ext = strrchr(s_selected.name, '.');
+    const char *ext = strrchr(file_item_name(&s_selected), '.');
     if (!ext) { snprintf(s_message, sizeof(s_message), "没有可用的打开方式"); return; }
     if (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt")) {
         extern const app_desc_t app_book;
@@ -888,7 +894,6 @@ static app_redraw_t save_rename(void) {
     notify_moved_tree(old_path, destination, 0);
     book_store_notify_changed();
     copy_utf8(s_selected.path, sizeof(s_selected.path), destination);
-    copy_utf8(s_selected.name, sizeof(s_selected.name), name);
     s_view = FILE_VIEW_ACTIONS;
     ui_keyboard_end();
     snprintf(s_message, sizeof(s_message), "重命名完成");

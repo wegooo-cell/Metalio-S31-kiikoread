@@ -35,6 +35,7 @@ common = r'''
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/types.h>
 #include "ui_text_edit.h"
 static char s_editor[121],s_editor_title[121],s_editor_ext[16],s_editor_pinyin[24],s_editor_notice[96],s_message[96];
 static ui_text_edit_t s_editor_input;
@@ -42,7 +43,7 @@ static bool s_editor_chinese,s_editor_signature,s_editor_uppercase;
 static size_t s_editor_candidate_page,s_editor_candidate_count;
 static int s_view,s_page;
 enum {FILE_VIEW_RENAME,EDIT,SETTINGS_TEXT_EDIT};
-static struct {char name[128],path[288];bool is_dir;} s_selected,s_managed;
+static struct {char name[128],path[288];bool is_dir;} s_managed;
 static uint8_t *s_editor_cover;
 static uint8_t *load_cover_gray(const char *p,const char *n,const char *a,bool f,bool *pending){(void)p;(void)n;(void)a;(void)f;*pending=false;return NULL;}
 static void copy_utf8(char *out,size_t cap,const char *s){snprintf(out,cap,"%s",s);}
@@ -54,7 +55,7 @@ static const char *app_settings_device_name(void){return "我的Pico";}
 static const char *app_settings_status_signature(void){return "慢慢阅读";}
 '''
 scenes = [
-    ('main/apps/app_files.c', 'editor_start', 's_editor', r' strcpy(s_selected.name,"你好世界.epub");editor_start();assert(!strcmp(s_editor_ext,".epub")&&!strcmp(s_editor,"你好世界")); s_selected.is_dir=true;strcpy(s_selected.name,"目录");editor_start();assert(!*s_editor_ext);'),
+    ('main/apps/app_files.c', 'editor_start', 's_editor', r' strcpy(s_selected.path,"/sdcard/books/你好世界.epub");editor_start();assert(!strcmp(s_editor_ext,".epub")&&!strcmp(s_editor,"你好世界")); s_selected.is_dir=true;strcpy(s_selected.path,"/sdcard/目录");editor_start();assert(!*s_editor_ext);'),
     ('main/apps/app_device_settings.c', 'profile_editor_open', 's_editor', r' profile_editor_open(false);assert(!strcmp(s_editor,"我的Pico"));profile_editor_open(true);assert(!strcmp(s_editor,"慢慢阅读"));'),
     ('main/apps/app_book.c', 'editor_start', 's_editor_title', r' strcpy(s_managed.name,"你好世界");editor_start();assert(!strcmp(s_editor_title,"你好世界"));'),
 ]
@@ -63,7 +64,11 @@ static ui_text_edit_t *test_bound;
 static void ui_keyboard_begin(ui_text_edit_t *edit,bool ascii){assert(!ascii);test_bound=edit;}
 """
 for path, name, buffer, lifecycle in scenes:
-    unit=common+'\n'+function(path,name)+'\nint main(void){'+lifecycle+f'''
+    file_types = ''
+    if path == 'main/apps/app_files.c':
+        file_types = re.search(r'typedef struct \{[^{{}}]*\} file_item_t;', (root/path).read_text()).group()
+        file_types += '\nstatic file_item_t s_selected;\n'+function(path, 'file_item_name')+'\n'
+    unit=common+'\n'+file_types+function(path,name)+'\nint main(void){'+lifecycle+f'''
         assert(test_bound==&s_editor_input&&s_editor_input.text=={buffer});
         assert(s_editor_input.cursor==strlen({buffer})&&s_editor_input.capacity==sizeof({buffer}));
         ui_text_edit_place(&s_editor_input,3);assert(ui_text_edit_insert(test_bound,"ABC"));

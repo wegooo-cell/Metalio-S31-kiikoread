@@ -70,6 +70,19 @@ int main(void){
  sample(true,1100);sample(true,1130);sample(false,1200);sample(false,1230);assert(action==READ_PICO_PMU_KEY_SHORT);
  assert(read_pico_pmu_keys_pause()==ESP_ERR_INVALID_STATE&&action==READ_PICO_PMU_KEY_SHORT&&!keys_paused);
  assert(!read_pico_pmu_take_key_wakeup());sample(true,1300);sample(true,1330);assert(read_pico_pmu_keys_pause()==ESP_ERR_INVALID_STATE);
+ // 恢复方向后的一次低电平/读错不得生成短按或长按。/ One low sample or IO fault after restoring directions must not synthesize a short/long press.
+ for(unsigned fault=0;fault<3;++fault){
+  reset();assert(read_pico_pmu_keys_pause()==ESP_OK);inputs=0x7fff;
+  if(fault==0)release_read=2;else fail_read=fault;
+  read_pico_pmu_keys_resume();assert(!held&&!candidate&&!state.key_state);
+  sample(false,100);sample(false,130);sample(false,1000);
+  assert(!read_pico_pmu_take_key_wakeup_single()&&!read_pico_pmu_lock_key_serial());
+ }
+ // 稳定真实按住仍由松开生成一个动作，不因恢复而重复。/ A stable real hold still generates one release action without a restore duplicate.
+ reset();assert(read_pico_pmu_keys_pause()==ESP_OK);inputs=0x7fff;
+ read_pico_pmu_keys_resume();assert(held&&candidate&&state.key_state);
+ assert(!read_pico_pmu_take_key_wakeup_single());sample(false,100);sample(false,130);
+ assert(read_pico_pmu_take_key_wakeup_single()&&!read_pico_pmu_take_key_wakeup_single());
  // Single mode accepts one fresh release or long action, never a continuing held level.
  reset();sample(true,0);sample(true,30);assert(!read_pico_pmu_take_key_wakeup_single());
  sample(false,80);sample(false,110);assert(read_pico_pmu_take_key_wakeup_single()&&!read_pico_pmu_take_key_wakeup_single());

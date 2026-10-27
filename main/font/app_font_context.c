@@ -20,6 +20,7 @@
 #if KIIKO_BOARD_METALIO47
 #include "esp_timer.h"
 #include "read_pico_sd.h"
+#include "sleep.h"
 #endif
 
 static bool s_reading;
@@ -38,7 +39,7 @@ static bool font_file(const char *path, struct stat *st) {
 static const char* system_path(char fallback[TTF_FONT_PATH_MAX]) {
     if (pico_boot_recovery()) return TTF_FONT_BUILTIN;
 #if KIIKO_BOARD_METALIO47
-    if(!read_pico_sd_io_ready())return ttf_font_path();
+    if(app_sleep_media_pending() || !read_pico_sd_io_ready())return ttf_font_path();
 #endif
     const char* chosen = app_settings_system_font_path();
     if (chosen[0]) return chosen;
@@ -55,7 +56,7 @@ static bool activate(const char* path) {
 #if KIIKO_BOARD_METALIO47
     // 有意暂停TF时不stat/卸载旧槽；挂载恢复后沿原选择重试。
     // Do not stat/unload retained faces while media is intentionally paused; retry the saved choice after mount.
-    if(!ttf_font_path_is_builtin(path)&&!read_pico_sd_io_ready())return false;
+    if(!ttf_font_path_is_builtin(path) && (app_sleep_media_pending() || !read_pico_sd_io_ready()))return false;
     const bool had_builtin=ttf_font_ready()&&ttf_font_is_builtin();
 #endif
     struct stat st = {0};

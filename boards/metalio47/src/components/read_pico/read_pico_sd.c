@@ -267,9 +267,28 @@ done:
     return unsupported;
 }
 
+// 成功挂载后，先验证真实扇区和FAT根目录，再允许字体/书籍访问。
+// Verify actual sector IO and the FAT root before publishing a mount to font/book consumers.
+static esp_err_t verify_mounted_card(void) {
+    esp_err_t err=sdmmc_get_status(card);
+    if (err != ESP_OK) return err;
+    if (card->csd.sector_size != 512) return ESP_ERR_NOT_SUPPORTED;
+    err=sdmmc_read_sectors(card,sd_dma_buffer,0,1);
+    if (err != ESP_OK) return err;
+    BYTE drive=ff_diskio_get_pdrv_card(card);
+    if (drive == 0xff) return ESP_ERR_INVALID_STATE;
+    char path[16];snprintf(path,sizeof(path),"%u:",(unsigned)drive);
+    FF_DIR root;
+    if (f_opendir(&root,path) != FR_OK) return ESP_FAIL;
+    FILINFO entry;
+    int read_error=f_readdir(&root,&entry);
+    int close_error=f_closedir(&root);
+    return read_error == FR_OK && close_error == FR_OK ? ESP_OK : ESP_FAIL;
+}
+
 static esp_err_t mount_card(bool format_if_failed) {
     filesystem_unreadable = false;
-    if (card != NULL) return ESP_OK;
+    if (card != NULL) return verify_mounted_card();
 
     metalio_sd_release_hold();
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
@@ -297,7 +316,7 @@ static esp_err_t mount_card(bool format_if_failed) {
 
     const esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = format_if_failed,
-        .max_files = 8,
+        .max_files = 16,
         .allocation_unit_size = 16 * 1024,
     };
 
@@ -333,6 +352,19 @@ static esp_err_t mount_card(bool format_if_failed) {
         }
         card = NULL;
         err = esp_vfs_fat_sdmmc_mount(SD_MOUNT_POINT, &host, &slot, &mount_config, &card);
+        if (err == ESP_OK) {
+            err=verify_mounted_card();
+            if (err != ESP_OK) {
+                // 尚未发布给消费者：安全卸载后继续降频，不记忆未验证的档位。
+                // No consumers admitted yet: unmount before fallback, never remember an unverified profile.
+                esp_err_t close_error=esp_vfs_fat_sdcard_unmount(SD_MOUNT_POINT,card);
+                if (close_error != ESP_OK) {
+                    metalio_usb_serial_reconnect();
+                    return close_error; // 保留card/DMA所有权供恢复。/ Retain card/DMA ownership for recovery.
+                }
+                card=NULL;
+            }
+        }
         if (err == ESP_OK) {
             sd_remember_profile(index);
             ESP_LOGI(TAG,"SD mounted profile: %d kHz/%d-bit preferred=%u attempt=%u",
@@ -569,6 +601,20 @@ bool read_pico_sd_io_ready(void) {
     bool ready = !suspended && probe_state != 1 && cached_info.mounted && !media_invalidated;
     portEXIT_CRITICAL(&state_lock);
     return ready;
+}
+esp_err_t read_pico_sd_invalidate_io(void) {
+    portENTER_CRITICAL(&state_lock);
+    if (probe_state == 1 || space_busy || health_busy) {
+        portEXIT_CRITICAL(&state_lock);
+        return ESP_ERR_NOT_FINISHED;
+    }
+    // 调用方已停消费者；仅失效快照，异步任务随后按既有所有权规则重挂。
+    // Consumers are closed; invalidate only the snapshot, then remount through the owned async task.
+    suspended=false;media_invalidated=true;probe_state=2;
+    memset(&cached_info,0,sizeof(cached_info));
+    cached_info.present=true;cached_info.error=ESP_FAIL;
+    portEXIT_CRITICAL(&state_lock);
+    return ESP_OK;
 }
 static void recovery_task(void *arg) {
     const bool manual = arg != NULL;

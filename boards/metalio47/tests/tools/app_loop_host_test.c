@@ -72,6 +72,15 @@ static bool binary_scope,navigation_scope;
 bool display_main_switch_erase_set(bool v){(void)v;return false;}
 bool display_main_shelf_home_erase_set(bool v){(void)v;return false;}
 bool app_sleep_media_ready(void){return true;}
+bool app_sleep_media_failed(void){return false;}
+#include "online_font.h"
+void online_font_status(online_font_status_t *s){s->busy=false;}
+void app_sleep_discard_media_io(void){}
+void book_close(void){}
+void ttf_font_close_embedded(void){}
+void ttf_font_unload(void){}
+esp_err_t read_pico_sd_invalidate_io(void){return ESP_OK;}
+bool app_font_recover_media(void){return false;}
 bool app_sd_recovery_busy(void){return false;}
 void read_pico_pmu_drain_events(void){}
 bool display_system_navigation_set(bool enabled){bool previous=navigation_scope;navigation_scope=enabled;return previous;}
@@ -749,7 +758,7 @@ int main(void) {
     assert(power_open_draws==1&&power_controls_draws==2&&shutdowns==1&&!restarts&&power_final_draws==1&&!touch_calls&&ticks==1&&du_areas==2&&gl_areas==1);
     reset();power_trigger_step=1;time_step=3000000;staged_shutdown=true;
     add(0,0,0,0);add(0,0,0,0);add(128,374,1,0);add(556,374,1,0);add(0,0,0,0);add(0,0,0,0);run();
-    assert(idle_locks==1&&wake_clean_requests==1&&!shutdowns&&!restarts&&!power_final_draws);
+    assert(!idle_locks&&!wake_clean_requests&&shutdowns==1&&!restarts&&power_final_draws==1);
     reset();power_trigger_step=1;time_step=3000000;
     add(0,0,0,0);add(0,0,0,0);add(UI_POWER_RESTART_X,UI_POWER_BUTTON_Y,1,0);add(0,0,0,0);run();
     assert(restarts==1&&!shutdowns&&power_final_draws==1);

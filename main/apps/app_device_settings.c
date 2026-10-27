@@ -1398,7 +1398,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
 #if KIIKO_BOARD_METALIO47
     if (s_page == SETTINGS_POWER_SLEEP) {
         back_header(fb, "关机睡眠");
-        section(fb, 248, "选择电源菜单中“关机”的方式");
+        section(fb, 248, "选择短按与自动锁屏后的省电方式");
         const char *labels[] = {"浅睡10分钟后关机", "彻底断电"};
         const char *details[] = {"浅睡可唤醒；关机后重新开机",
                                  "长按电源键开机"};
@@ -1412,7 +1412,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         }
         ui_text(fb, 54, 664, 18, "关机前保存进度并同步 RTC", EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 54, 708, 18, "USB 连接时暂缓休眠", EPD_DRAW_ALIGN_LEFT, false);
-        ui_text(fb, 54, 810, 18, "日常锁屏十分钟后同样关机", EPD_DRAW_ALIGN_LEFT, false);
+        ui_text(fb, 54, 810, 18, "电源菜单滑动关机始终直接断电", EPD_DRAW_ALIGN_LEFT, false);
         ui_text(fb, 54, 866, 20, "设置了锁屏密码时仍需验证", EPD_DRAW_ALIGN_LEFT, false);
         settings_navigation(fb);
         return;

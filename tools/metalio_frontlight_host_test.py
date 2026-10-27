@@ -19,6 +19,9 @@ unit=r'''
 typedef int esp_err_t;
 typedef int nvs_handle_t;
 #define ESP_OK 0
+#define GPIO_NUM_6 6
+#define GPIO_NUM_7 7
+static int gpio_hold_dis(int pin){assert(pin==6||pin==7);return 0;}
 #define NVS_READONLY 0
 #define NVS_READWRITE 1
 #define LEDC_LOW_SPEED_MODE 0

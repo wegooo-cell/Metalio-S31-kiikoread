@@ -10,6 +10,7 @@ import os
 import subprocess
 import tempfile
 import zipfile
+from zip_fixture_helpers import with_local_extra
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -75,6 +76,9 @@ def main():
 
         def case(name, edit=None):
             file = work / (name + '.epub'); make_book(file, edit); cases.append(file)
+
+        case('good_local_zip64_placeholder')
+        cases[-1].write_bytes(with_local_extra(cases[-1].read_bytes(), struct.pack('<HHQQ', 1, 16, 0, 0)))
 
         def replace_opf(old, new):
             return lambda files: files.__setitem__('OPS/pkg/book.opf', files['OPS/pkg/book.opf'].replace(old, new))

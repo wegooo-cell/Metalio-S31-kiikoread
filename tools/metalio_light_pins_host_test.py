@@ -11,6 +11,8 @@ unit=r'''
 #include <stdio.h>
 typedef int esp_err_t;
 #define ESP_OK 0
+#define GPIO_NUM_6 6
+#define GPIO_NUM_7 7
 #define ESP_ERR_INVALID_ARG -2
 #define GPIO_MODE_INPUT_OUTPUT 3
 #define GPIO_PULLUP_DISABLE 0
@@ -45,9 +47,15 @@ int main(void){
   assert(touched==expected&&revoked==expected&&!latched);
   assert(!CNNT_PAD_CTRL.ctrl.sdio_pad_pin_ctrl_ded_sel&&CNNT_PAD_CTRL.sdio_clk.sdio_clk_fun_wpd&&!CNNT_PAD_CTRL.sdio_clk.sdio_clk_fun_wpu);
   bad_pin=-1;bad_hold=failure<0?-1:light_sleep_pins[failure];
-  assert((metalio_hold_for_light_sleep()==0)==(failure<0));assert(latched==expected);
-  metalio_release_light_sleep_pins();assert(!latched);
+  assert((metalio_hold_for_light_sleep()==0)==(failure<0));assert(latched==(expected|(1ULL<<6)|(1ULL<<7)));
+  metalio_release_light_sleep_pins();assert(latched==((1ULL<<6)|(1ULL<<7)));
+  gpio_hold_dis(6);gpio_hold_dis(7);assert(!latched);
  }
+ for(int p=6;p<=7;p++){
+  bad_hold=p;latched=0;assert(metalio_hold_for_light_sleep()!=ESP_OK);
+  metalio_release_light_sleep_pins();gpio_hold_dis(6);gpio_hold_dis(7);
+ }
+ bad_hold=-1;
  for(int fail=0;fail<=4;fail++){
   uint16_t saved;io_calls=0;bad_io=fail;outputs[0]=0x20;outputs[1]=0x14;
   int cut=metalio_sleep_cut_rails(&saved);assert(saved==0x1420);
@@ -56,7 +64,7 @@ int main(void){
   assert(outputs[0]==0x20&&outputs[1]==0x14);
   assert(io_pins[io_calls-2]==12&&io_pins[io_calls-1]==5);
  }
- puts("PASS: exact vendor 16 EPD + six SD pins, CNNT release, all22 prepare/hold failures, no GPIO2/36 or LEDC changes, P5/P14 cut and reverse restoration despite I2C faults");
+ puts("PASS: exact vendor 16 EPD + six SD pins, CNNT release, all22 prepare/hold failures, no GPIO2/36 or LEDC remapping, zero-duty LEDC pads held until authorized light restore, P5/P14 cut and reverse restoration despite I2C faults");
 }
 '''
 # Avoid undefined negative shifts in the fault sentinel.

@@ -1,0 +1,8 @@
+config METALIO_EARLY_POWER_KEY
+    bool "Local S31 early physical power-key handoff"
+    depends on IDF_TARGET_ESP32S31
+    default n
+    help
+        Experimental matched bootloader/application P17 capture before loading the app.
+        Requires installing the paired bootloader. Does not change RTC SDK layout.
+

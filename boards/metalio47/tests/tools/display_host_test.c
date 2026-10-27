@@ -95,6 +95,9 @@ static enum EpdDrawError water_result;
 static int water_calls;
 static EpdRect last_area;
 
+// Exercise the real lock dispatch together with the production display wrapper.
+#include "metalio_lock_present.inc"
+
 enum EpdDrawError e0470_page_turn(EpdiyHighlevelState* hl,EpdRect area,e0470_turn_dir_t dir) {
     (void)hl;(void)area;(void)dir;
     assert(false);return EPD_DRAW_OTHER_ERROR;
@@ -267,6 +270,25 @@ int main(void) {
         assert(update_display_image_gray(&hl)==EPD_DRAW_SUCCESS);
         assert(draws==before+1 && last_mode==MODE_GC16 && waveform_at_draw==&E0470_FULL_WAVEFORM);
         assert(correct_target_at_draw && !memcmp(front,target,FB_BYTES));
+        assert(display_system_binary_set(false)==(bool)binary);
+        assert(display_system_navigation_set(false)==(bool)nav);
+    }
+
+    // Wallpaper lock has one original GC48 output from the real previous pixels,
+    // including when entered from a BW page with an armed fixed-navigation pass.
+    for (unsigned binary=0;binary<2;++binary) for (unsigned nav=0;nav<2;++nav) {
+        for(size_t i=0;i<FB_BYTES;++i)front[i]=target[i]=(uint8_t)((i%16)*17);
+        memset(back,0x55,FB_BYTES);
+        display_system_binary_set(binary);display_system_navigation_set(nav);
+        display_main_transition_arm(&hl,true,true);
+        display_request_full_refresh();
+        int before_draw=draws,before_full=full_draws,before_clear=clears;
+        assert(lock_present_art(&hl,1)==EPD_DRAW_SUCCESS);
+        assert(draws==before_draw+1&&full_draws==before_full+1&&clears==before_clear);
+        assert(correct_target_at_draw&&!white_baseline&&last_mode==MODE_GC16);
+        assert(last_scan==READ_PICO_EPD_SCAN_FULL&&waveform_at_draw==&E0470_FULL_WAVEFORM);
+        assert(!memcmp(front,target,FB_BYTES)&&!memcmp(back,target,FB_BYTES));
+        assert(!ota_display_depth&&hl.waveform==&E0470_WAVEFORM);
         assert(display_system_binary_set(false)==(bool)binary);
         assert(display_system_navigation_set(false)==(bool)nav);
     }

@@ -3335,7 +3335,10 @@ esp_err_t ttf_font_suspend_io(void) {
 }
 esp_err_t ttf_font_resume_io(void) {
     esp_err_t result = ESP_OK;
-    for (int i=0; i<TTF_FONT_SLOTS; ++i) {
+    // 当前槽先占文件名额；闲置槽失败不能阻塞书架和当前字体恢复。
+    // Open the active slot first; an idle slot must not block current-face/media recovery.
+    for (int step=0; step<TTF_FONT_SLOTS; ++step) {
+        int i=(s_cur_index+step)%TTF_FONT_SLOTS;
         ttf_slot_t *face = &s_slots[i];
         if (!face->f_io_suspended) continue;
         int fd = open(face->f_path, O_RDONLY);
@@ -3344,12 +3347,16 @@ esp_err_t ttf_font_resume_io(void) {
             now.st_mtime != face->f_io_stat.st_mtime || lseek(fd, face->f_io_position, SEEK_SET) < 0) {
             if (fd >= 0) close(fd);
             face->f_ready = false;
-            result = ESP_FAIL;
+            if (i == s_cur_index) result = ESP_FAIL;
             continue;
         }
         face->f_fd = fd; face->f_io_suspended = false; face->f_ready = face->f_io_ready;
     }
     return result;
+}
+bool ttf_font_io_pending(void) {
+    for (int i=0; i<TTF_FONT_SLOTS; ++i) if (s_slots[i].f_io_suspended) return true;
+    return false;
 }
 #else
 #endif

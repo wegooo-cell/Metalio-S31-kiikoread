@@ -202,6 +202,7 @@ void ttf_bench_end(ttf_bench_stats_t* out);
 
 /// 浅睡保留字库/字形缓存和槽位，只暂停 TF 文件句柄。/ Keep faces/glyph caches while pausing TF handles.
 esp_err_t ttf_font_suspend_io(void);
+bool ttf_font_io_pending(void);
 esp_err_t ttf_font_resume_io(void);
 #else
 #endif

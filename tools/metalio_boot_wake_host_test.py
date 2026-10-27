@@ -34,7 +34,7 @@ static bool s_boot_from_deep,s_boot_power_wake,s_boot_power_on,s_boot_lock_draw;
 static int reset_reason,cause,wake_presses;
 static uint64_t ext1;
 static bool resume,pin,physical,queued,prior_lock;
-static unsigned waits,latches,auth,holds,ready,frames,hints,manual_presses;
+static unsigned waits,latches,auth,holds,ready,frames,hints,manual_presses,clears;
 static int esp_reset_reason(void){return reset_reason;}
 static int esp_sleep_get_wakeup_cause(void){return cause;}
 static uint64_t esp_sleep_get_ext1_wakeup_status(void){return ext1;}
@@ -43,6 +43,7 @@ static bool lock_pin_enabled(void){return pin;}
 static int app_settings_wake_presses(void){return wake_presses;}
 static bool pico_boot_has_resume(void){return resume;}
 static bool pico_boot_lock_pending(void){return prior_lock;}
+static void pico_boot_clear_resume(void){assert(prior_lock&&!resume);prior_lock=false;++clears;}
 static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++holds;}
 static void lock_hint_begin(EpdiyHighlevelState *h){assert(h);++hints;}
@@ -85,13 +86,14 @@ static void reset(void){
  s_boot_from_deep=s_boot_power_wake=s_boot_power_on=s_boot_lock_draw=false;
  reset_reason=ESP_RST_POWERON;cause=0;ext1=0;wake_presses=1;
  resume=true;pin=physical=queued=prior_lock=false;
- waits=latches=auth=holds=ready=frames=hints=manual_presses=0;
+ waits=latches=auth=holds=ready=frames=hints=manual_presses=clears=0;
 }
 static void gate(void){EpdiyHighlevelState hl={0};app_lock_capture_boot_wakeup();app_lock_boot_gate(&hl,(void*)1,(void*)2);assert(!hints&&frames==1);}
 int main(void){
- reset();gate();assert(!waits&&!manual_presses&&ready==1&&holds==1);
+ reset();physical=true;gate();assert(!waits&&!manual_presses&&ready==1&&holds==1);
  reset();reset_reason=ESP_RST_DEEPSLEEP;cause=ESP_SLEEP_WAKEUP_EXT1;ext1=4;physical=true;
  gate();assert(waits==1&&latches==1&&!manual_presses);
+ reset();gate();assert(waits==1&&manual_presses==1&&!latches);
  // Missing physical evidence, timer wake, another GPIO and software reset retain the lock.
  for(unsigned i=0;i<4;i++){
   reset();reset_reason=ESP_RST_DEEPSLEEP;cause=ESP_SLEEP_WAKEUP_EXT1;ext1=4;physical=true;
@@ -108,7 +110,9 @@ int main(void){
  }
  reset();resume=false;gate();assert(!waits&&!latches&&!holds);
  // Watchdog recovery may forbid book/font resume while still retaining the prior lock.
- reset();resume=false;prior_lock=true;reset_reason=7;gate();assert(waits==1&&!latches&&manual_presses==1);
+ reset();resume=false;prior_lock=true;reset_reason=7;gate();assert(waits==1&&!latches&&manual_presses==1&&clears==1&&!prior_lock);
+ reset();resume=false;prior_lock=true;reset_reason=7;pin=true;gate();assert(auth==1&&clears==1&&!prior_lock);
+ reset();prior_lock=true;gate();assert(waits==1&&!clears&&prior_lock);
  puts("PASS: S31 actual boot gate, single hardware boot, confirmed deep key, no shared-IRQ/timer/software-reset auto unlock, double/PIN retained");
 }
 '''

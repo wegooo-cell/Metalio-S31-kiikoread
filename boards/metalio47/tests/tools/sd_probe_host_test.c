@@ -18,6 +18,8 @@ static int mount_calls, unmount_calls, test_fail_above_khz;
 static esp_err_t test_mount_error = ESP_ERR_TIMEOUT;
 static int clock_history[256],width_history[256], delays;
 static bool test_need_single;
+static int verified_fail_above_khz,active_khz;
+static unsigned verified_reads;
 int test_reset_reason;
 static uint64_t test_total=1024*512,test_free=768*512;
 static esp_err_t test_info_error=ESP_OK;
@@ -41,6 +43,7 @@ esp_err_t sdmmc_get_status(sdmmc_card_t *c){assert(c==&test_card);return ESP_OK;
 static FATFS test_fat={.free_clst=1};
 BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){assert(c==&test_card);return 0;}
 int f_opendir(FF_DIR *root,const char *path){assert(!strcmp(path,"0:"));root->obj.fs=&test_fat;return FR_OK;}
+int f_readdir(FF_DIR *root,FILINFO *entry){assert(root->obj.fs==&test_fat);entry->fname[0]=0;return FR_OK;}
 int f_closedir(FF_DIR *root){assert(root->obj.fs==&test_fat);return FR_OK;}
 int ff_mutex_take(int drive){assert(drive==0&&!fat_locked);fat_locked=true;return 1;}
 void ff_mutex_give(int drive){assert(drive==0&&fat_locked&&test_fat.free_clst==UINT32_MAX);fat_locked=false;++invalidations;}
@@ -48,7 +51,7 @@ esp_err_t test_host_init(void){return ESP_OK;}
 esp_err_t test_host_deinit(void){return ESP_OK;}
 esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *out){(void)host;*out=test_card;return test_raw_error?ESP_ERR_TIMEOUT:ESP_OK;}
-esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
+esp_err_t sdmmc_read_sectors(sdmmc_card_t *c,void *buffer,size_t start,size_t count){(void)c;(void)start;assert(count==1);++verified_reads;if(verified_fail_above_khz&&active_khz>verified_fail_above_khz)return ESP_ERR_TIMEOUT;if(test_raw_error)return ESP_ERR_TIMEOUT;memset(buffer,0x5a,512);if(test_exfat)memcpy((char*)buffer+3,"EXFAT   ",8);return ESP_OK;}
 bool read_pico_sd_present(void) { return test_present; }
 esp_err_t read_pico_sd_detect(bool* present) {
     if (detect_failure) return ESP_ERR_TIMEOUT;
@@ -91,6 +94,7 @@ esp_err_t esp_vfs_fat_sdmmc_mount(const char* path, const sdmmc_host_t* host,
     assert(!host->check_buffer_alignment(0,test_dma_live,4096));
     test_external_dma_ptr=NULL;
     if((test_need_single&&slot->width!=1)||(test_fail_above_khz && host->max_freq_khz > test_fail_above_khz)){*out=NULL;return test_mount_error;}
+    active_khz=host->max_freq_khz;assert(config->max_files==16);
     *out = &test_card;
     return ESP_OK;
 }
@@ -238,6 +242,13 @@ int main(void) {
     test_fail_above_khz=5000;before=mount_calls;
     assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED&&mount_calls==before+2&&s_sd_last_profile==4);
     assert(clock_history[before]==10000&&clock_history[before+1]==5000);
+    // SDK mount success alone is insufficient: failed real reads must cleanly fall back.
+    assert(close_card()==ESP_OK);test_fail_above_khz=0;verified_fail_above_khz=10000;
+    s_sd_last_profile=-1;s_sd_sleep_profile=0;before=mount_calls;int prior_unmounts=unmount_calls;unsigned prior_reads=verified_reads;
+    assert(read_pico_sd_remount()==ESP_ERR_NOT_FINISHED&&mount_calls==before+4);
+    assert(read_pico_sd_get_info(&info)==ESP_OK&&info.mounted&&s_sd_last_profile==3);
+    assert(unmount_calls==prior_unmounts+3&&verified_reads==prior_reads+4);
+    verified_fail_above_khz=0;test_fail_above_khz=5000;
     // 单线只在四线失败后使用，成功后复用，单线5MHz失败时退到1MHz。
     // Try single-line only after four-line failure; reuse success and lower5MHz to1MHz when needed.
     s_sd_last_profile=-1;s_sd_sleep_profile=0;test_need_single=true;before=mount_calls;
@@ -285,6 +296,14 @@ int main(void) {
     assert(!manual_busy&&read_pico_sd_get_info(&info)==ESP_FAIL&&card);fail_unmount=false;
     assert(read_pico_sd_start_manual_recovery()==ESP_OK);work=queued_manual;queued_manual=NULL;work(queued_manual_arg);
     assert(read_pico_sd_get_info(&info)==ESP_OK&&info.mounted&&format_calls==old_formats);
+    // Snapshot invalidation never steals an active health/accounting/mount owner or unmounts live IO.
+    before=unmount_calls;health_busy=true;
+    assert(read_pico_sd_invalidate_io()==ESP_ERR_NOT_FINISHED&&unmount_calls==before);
+    health_busy=false;space_busy=true;
+    assert(read_pico_sd_invalidate_io()==ESP_ERR_NOT_FINISHED&&unmount_calls==before);
+    space_busy=false;assert(read_pico_sd_invalidate_io()==ESP_OK&&card&&unmount_calls==before&&!read_pico_sd_io_ready());
+    assert(read_pico_sd_needs_recovery()&&read_pico_sd_start_recovery()==ESP_OK);
+    assert(read_pico_sd_io_ready()&&unmount_calls==before+1&&format_calls==old_formats);
     assert(close_card()==ESP_OK&&!sd_dma_buffer&&test_dma_allocs==test_dma_frees);
     puts("PASS: SD profiles/RTC and DMA, asynchronous manual recovery from failed/paused/removal states, lifecycle owners/OOM/unmount failure/retry/no autoformat/256GiB");
     return 0;

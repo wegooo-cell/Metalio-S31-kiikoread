@@ -6,7 +6,9 @@
 typedef uint8_t BYTE;
 typedef struct {uint32_t free_clst; BYTE ldrv;} FATFS;
 typedef struct {struct {FATFS *fs;}obj;} FF_DIR;
+typedef struct {char fname[256];} FILINFO;
 int f_opendir(FF_DIR *root,const char *path);
+int f_readdir(FF_DIR *root,FILINFO *entry);
 int f_closedir(FF_DIR *root);
 int ff_mutex_take(int drive);
 void ff_mutex_give(int drive);

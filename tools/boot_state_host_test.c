@@ -55,7 +55,19 @@ static void seed_legacy(boot_record_t record) {
 int main(void) {
     pico_resume_t resume = {.tab=1, .reader=1, .fullscreen=1, .path="/sdcard/books/deep.epub"}, out;
     char interrupted[PICO_BOOT_PATH_MAX];
-    pico_boot_init(false); assert(!pico_boot_recovery() && !pico_boot_take_resume(&out));
+#if KIIKO_BOARD_METALIO47
+    // 解锁前连续重启不能抹掉锁定意图，异常启动仍禁止自动开书/导入字体。
+    // Consecutive boots before unlock must retain the lock while abnormal startup still forbids automatic book/font resume.
+    pico_boot_init(false);pico_boot_ready();assert(pico_boot_save_resume(&resume)==ESP_OK);
+    pico_boot_init(false);assert(pico_boot_lock_pending()&&durable.resume_valid);
+    for(unsigned cycle=0;cycle<3;++cycle){
+        pico_boot_init(true);
+        assert(pico_boot_lock_pending()&&durable.resume_valid&&pico_boot_recovery()&&!pico_boot_has_resume());
+    }
+    pico_boot_ready();pico_boot_clear_resume();
+    assert(!pico_boot_lock_pending()&&!durable.resume_valid);
+#endif
+    pico_boot_init(false); assert(!pico_boot_recovery() && !pico_boot_take_resume(&out) && !s_recovery_reasons);
     pico_boot_ready();
     assert(pico_boot_save_resume(&resume) == ESP_OK);
     pico_boot_init(false);
@@ -65,6 +77,7 @@ int main(void) {
     // 恢复过程中又复位，入口已消费且启动未完成，回到保护模式。
     // Reset again while resuming: consumption and incomplete startup prevent a loop.
     pico_boot_init(false); assert(pico_boot_recovery() && !pico_boot_take_resume(&out));
+    assert(s_recovery_reasons==BOOT_RECOVERY_STARTING);
     pico_boot_ready(); pico_boot_init(false); assert(!pico_boot_recovery()); pico_boot_ready();
     // 密码取消/深睡再次开机不能丢失恢复，但实际开书前必须消费。
     // PIN cancellation and another deep boot retain resume; actual opening still consumes it.
@@ -77,6 +90,7 @@ int main(void) {
     fail_commit=true; assert(!pico_boot_take_resume(&out)); fail_commit=false; pico_boot_clear_resume();
     assert(pico_boot_book_begin("/sdcard/books/large.epub") == ESP_OK);
     pico_boot_init(false); assert(pico_boot_recovery());
+    assert(s_recovery_reasons==BOOT_RECOVERY_OPENING);
     assert(pico_boot_interrupted_book(interrupted, sizeof(interrupted)) && !strcmp(interrupted, "/sdcard/books/large.epub"));
     assert(!pico_boot_interrupted_book(interrupted, 8));
     pico_boot_ready(); pico_boot_init(false); pico_boot_ready();
@@ -96,6 +110,7 @@ int main(void) {
     pico_boot_init(false); assert(!pico_boot_take_resume(&out)); pico_boot_ready();
     assert(pico_boot_save_resume(&resume) == ESP_OK); pico_boot_init(true);
     assert(pico_boot_recovery() && !pico_boot_take_resume(&out) && !pico_boot_interrupted_book(interrupted, sizeof(interrupted)));
+    assert(s_recovery_reasons==BOOT_RECOVERY_RESET);
 #if KIIKO_BOARD_METALIO47
     // WDT保护禁用字体/开书，但不能顺便取消锁屏。/ Watchdog recovery blocks fonts/books without clearing the lock gate.
     assert(pico_boot_lock_pending() && !pico_boot_has_resume());
@@ -108,21 +123,28 @@ int main(void) {
     assert(pico_boot_book_begin("/other/book.epub")==ESP_ERR_INVALID_ARG);
     durable_raw[durable_size-1] ^= 1;
     pico_boot_init(false); assert(pico_boot_recovery()); pico_boot_ready();
+    assert(s_recovery_reasons==BOOT_RECOVERY_RECORD);
 #if KIIKO_BOARD_METALIO47
     assert(!pico_boot_lock_pending());
 #endif
     fail_commit=true;
     assert(pico_boot_book_begin("/sdcard/book.epub")==ESP_FAIL);
     pico_boot_init(false); assert(pico_boot_recovery() && !pico_boot_take_resume(&out));
+    assert(s_recovery_reasons==BOOT_RECOVERY_STORE);
     fail_commit=false; fail_open=true;
     pico_boot_init(false); assert(pico_boot_recovery() && pico_boot_book_begin("/sdcard/book.epub")!=ESP_OK);
+    assert(s_recovery_reasons==(BOOT_RECOVERY_RECORD|BOOT_RECOVERY_STORE));
     fail_open=false;
     assert(commits > 0);
     present=false;memset(&durable,0,sizeof(durable));pico_boot_init(false);pico_boot_ready();
     strcpy(resume.path,"/sdcard/books/deep.epub");
     assert(pico_boot_save_resume(&resume)==ESP_OK&&pico_boot_mark_frame_cached()==ESP_OK);
     pico_boot_init(false);assert(pico_boot_has_resume()&&pico_boot_resume_frame_cached());
+#if KIIKO_BOARD_METALIO47
+    assert(durable.reserved[0]==1&&durable.resume_valid&&pico_boot_lock_pending());
+#else
     assert(durable.reserved[0]==0&&!durable.resume_valid);
+#endif
     // 多次等待/深睡都保留真实锁图标记，但新开书前仍消费一次性入口。
     // Repeated locked boots retain the actual-art marker while book admission remains one-shot.
     for(unsigned cycle=0;cycle<4;++cycle){

@@ -5,8 +5,8 @@
  * 验证 ZIP 中央目录与本地头，用 ROM miniz 解压到调用方缓冲。
  * Validate ZIP central/local headers and inflate through ROM miniz into caller buffers.
  *
- * 冻结：只读文件，PSRAM 有界；拒绝加密、ZIP64、多磁盘及重复路径。
- * Frozen: read-only files and bounded PSRAM; reject encryption, ZIP64, multiple disks and duplicate paths.
+ * 冻结：只读文件，PSRAM 有界；拒绝加密、真正的 ZIP64、多磁盘及重复路径。
+ * Frozen: read-only files and bounded PSRAM; reject encryption, actual ZIP64, multiple disks and duplicate paths.
  */
 #include "zip_reader.h"
 #include <limits.h>
@@ -85,12 +85,20 @@ static bool read_at(zip_reader_t* z, uint32_t pos, void* dst, size_t size) {
         fseek(z->file, (long)pos, SEEK_SET) == 0 && fread(dst, 1, size, z->file) == size;
 }
 
-// ZIP64 扩展即使没有哨兵值也拒绝；扩展字段必须完整。
-// Reject ZIP64 extras even without sentinel sizes; every extra field must be complete.
-static bool extras_valid(zip_reader_t* z, uint32_t pos, uint16_t len) {
+// 只兼容本地头单个全零的16字节ZIP64预留载荷；尺寸仍须由两份32位头一致给出。
+// Accept only one zero-filled 16-byte ZIP64 placeholder in a local header, with matching 32-bit sizes.
+static bool extras_valid(zip_reader_t* z, uint32_t pos, uint16_t len, bool local_padding) {
+    bool padding_seen = false;
     while (len) {
         uint8_t h[4];
-        if (len < 4 || !read_at(z, pos, h, 4) || u16(h) == 1 || u16(h + 2) > len - 4) return false;
+        if (len < 4 || !read_at(z, pos, h, 4) || u16(h + 2) > len - 4) return false;
+        if (u16(h) == 1) {
+            uint8_t reserved[16];
+            if (!local_padding || padding_seen || u16(h + 2) != sizeof(reserved) ||
+                !read_at(z, pos + 4, reserved, sizeof(reserved))) return false;
+            for (size_t i = 0; i < sizeof(reserved); ++i) if (reserved[i]) return false;
+            padding_seen = true;
+        }
         uint32_t step = 4U + u16(h + 2);
         pos += step;
         len = (uint16_t)(len - step);
@@ -257,7 +265,7 @@ esp_err_t zip_open(const char* path, zip_reader_t** out) {
             slot = (uint16_t)((slot + 1) & z->slot_mask);
         }
         z->slots[slot] = (uint16_t)(i + 1);
-        if (!extras_valid(z, pos + 46 + name_len, extra_len)) goto fail;
+        if (!extras_valid(z, pos + 46 + name_len, extra_len, false)) goto fail;
         pos += record_len;
     }
     if (pos != eocd_pos) goto fail;
@@ -320,7 +328,7 @@ static esp_err_t extract_impl(zip_reader_t* z, int index, void* dst, size_t cap,
     if (name == NULL) return ESP_ERR_NO_MEM;
     bool name_ok = read_at(z, entry->offset + 30, name, name_len) &&
                    memcmp(name, entry->name, name_len) == 0 &&
-                   extras_valid(z, entry->offset + 30 + name_len, extra_len);
+                   extras_valid(z, entry->offset + 30 + name_len, extra_len, !(entry->flags & 8));
     free(name);
     if (!name_ok) return ESP_ERR_INVALID_SIZE;
     uint32_t data_pos = entry->offset + header_size;

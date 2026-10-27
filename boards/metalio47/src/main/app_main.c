@@ -154,6 +154,7 @@ static bool prepare_startup_frame(EpdiyHighlevelState *hl,uint8_t *framebuffer,b
 }
 
 void app_main(void) {
+    metalio_capture_boot_power_key();
     app_lock_capture_boot_wakeup();
     ESP_ERROR_CHECK(metalio_sleep_sdk_init());
     // 共享 TF 卡期间复位后，先把内部 PHY 交回串口，再清理已用完的 BOOT 请求。
@@ -189,7 +190,7 @@ void app_main(void) {
     // 双击门禁始终显示锁图，不能在“准备资源”页暗中等按键。
     // A double-press gate retains lock art rather than waiting behind the resource splash.
     const bool retain_lock = (pico_boot_has_resume() || pico_boot_lock_pending()) &&
-        (reset != ESP_RST_POWERON || app_settings_wake_presses() == 2);
+        (reset != ESP_RST_POWERON || !metalio_boot_power_key() || app_settings_wake_presses() == 2);
     (void)prepare_startup_frame(&hl,framebuffer,retain_lock,vcom_ok);
     rp_boot_mark("splash");
     // 直接续读不先加载整份系统字体；密码验证仍先使用所选系统字体。
@@ -220,6 +221,7 @@ void app_main(void) {
     pico_ota_confirm_running();
 
     app_lock_boot_gate(&hl, hw.touch, hw.sensor);
+    metalio_frontlight_restore();
     rp_boot_mark("lock");
     const app_desc_t *first = app_home_page();
     pico_resume_t resume = {0};

@@ -90,3 +90,8 @@ void epd_fill_triangle(int,int,int,int,int,int,uint8_t,uint8_t*);
 void read_pico_sd_poll_health(void);
 bool read_pico_sd_needs_recovery(void);
 int read_pico_sd_start_recovery(void);
+
+void ttf_font_close_embedded(void);
+void ttf_font_unload(void);
+int read_pico_sd_invalidate_io(void);
+bool app_font_recover_media(void);

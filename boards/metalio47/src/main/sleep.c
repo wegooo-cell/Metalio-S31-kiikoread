@@ -74,17 +74,28 @@ static bool lock_take_key_wakeup(void) {
 static bool s_lock_io_pending;
 static bool s_lock_io_no_media;
 static int64_t s_lock_io_retry_us;
+static unsigned s_lock_io_failures;
+static bool s_lock_io_failed;
+// 恢复失败不能无限挡住主循环的卡恢复；真正的重挂由消费者释放后执行。
+// Bounded reopen failures yield to loop-owned card recovery after consumers close.
+static esp_err_t lock_media_result(esp_err_t err) {
+    if (err == ESP_OK) { s_lock_io_failures = 0; s_lock_io_failed = false; }
+    else if (err != ESP_ERR_NOT_FINISHED && ++s_lock_io_failures >= 3) s_lock_io_failed = true;
+    return err;
+}
 // TF异步挂载完成才恢复书籍/字体；失败保持原路径和挂起句柄，允许后续重试。
 // Reopen book/font IO only after asynchronous TF mount; retain paths and suspended handles on failure.
 static esp_err_t lock_resume_media_io(uint32_t wait_ms) {
     if (!s_lock_io_pending) return ESP_OK;
     if (usb_storage_active()) return ESP_ERR_INVALID_STATE;
+    if (s_lock_io_failed) return ESP_FAIL;
     // 无卡且无待重开的句柄时可以完成恢复；不为内建字体强制挂卡。
     // With no card or suspended handles, complete recovery without mounting for the built-in face.
     if (s_lock_io_no_media) {
-        esp_err_t font=ttf_font_resume_io(), book=book_resume_io();
         s_lock_io_no_media=false;
-        if(font==ESP_OK && book==ESP_OK) { s_lock_io_pending=false; return ESP_OK; }
+        if (!ttf_font_io_pending() && !book_io_pending()) {
+            s_lock_io_pending=false; return lock_media_result(ESP_OK);
+        }
     }
     read_pico_sd_info_t info = {0};
     esp_err_t err = read_pico_sd_get_info(&info);
@@ -96,10 +107,11 @@ static esp_err_t lock_resume_media_io(uint32_t wait_ms) {
         if (esp_timer_get_time() >= deadline) break;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
-    if (err != ESP_OK || !info.mounted) return err == ESP_OK ? ESP_ERR_INVALID_STATE : err;
+    if (err != ESP_OK || !info.mounted)
+        return lock_media_result(err == ESP_OK ? ESP_ERR_INVALID_STATE : err);
     esp_err_t font = ttf_font_resume_io(), book = book_resume_io();
     if (font == ESP_OK && book == ESP_OK) s_lock_io_pending = false;
-    return font != ESP_OK ? font : book;
+    return lock_media_result(font != ESP_OK ? font : book);
 }
 static void lock_resume_io_service(void) {
     metalio_sleep_report_reset();
@@ -114,10 +126,14 @@ bool app_sleep_media_ready(void) {
     lock_resume_io_service();
     return !s_lock_io_pending;
 }
+bool app_sleep_media_failed(void) { return s_lock_io_pending && s_lock_io_failed; }
+bool app_sleep_media_pending(void) { return s_lock_io_pending; }
 void app_sleep_discard_media_io(void) {
     s_lock_io_pending = false;
     s_lock_io_no_media = false;
     s_lock_io_retry_us = 0;
+    s_lock_io_failures = 0;
+    s_lock_io_failed = false;
 }
 static bool s_lock_feedback_started;
 static bool s_lock_deep_ready;
@@ -130,7 +146,7 @@ void app_lock_capture_boot_wakeup(void) {
     s_boot_power_wake=s_boot_from_deep && esp_sleep_get_wakeup_cause()==ESP_SLEEP_WAKEUP_EXT1 &&
         (esp_sleep_get_ext1_wakeup_status() & (UINT64_C(1)<<READ_PICO_IOE_INT_GPIO))!=0;
 }
-static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc, cst836u_handle_t touch, bool *key_wake, int64_t wake_by);
+static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc, cst836u_handle_t touch, bool *key_wake, int64_t wake_by, bool off_at_deadline);
 void app_lock_set_resume_ready(bool ready) { s_lock_deep_ready = ready; }
 
 
@@ -196,6 +212,14 @@ static EpdiyHighlevelState *s_boot_lock_hl;
 static bool s_boot_lock_active, s_boot_lock_known, s_boot_lock_draw;
 
 static enum EpdDrawError lock_present_art(EpdiyHighlevelState *hl,uint8_t style) {
+    if (style == 1) {
+        // 壁纸直接从真实旧帧走一轮完整GC48，避免先白屏再输出；不继承文件/设置页的黑白策略。
+        // Present wallpaper from the real prior frame in one native GC48 pass, bypassing inherited system BW policy.
+        const bool binary = display_system_binary_set(false);
+        enum EpdDrawError result = update_display_full(hl);
+        display_system_binary_set(binary);
+        return result;
+    }
     // PNG已合成在目标帧中；只清除物理旧态再输出，透明区的底页和不透明主体都保留。
     // The PNG is already composed into the target; clear only the prior optical state, retaining both the backdrop and opaque artwork.
     return style==3 ? update_display_image_gray(hl) : update_display_full(hl);
@@ -336,22 +360,33 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeo
     metalio_frontlight(0,50);
     app_wake_source_t wake=APP_WAKE_NONE;
     bool usb_was_blocked=metalio_usb_blocks_sleep();
-    const int64_t off_at=s_lock_sleep_touch&&!timeout_ms ? start+APP_LOCK_OFF_AFTER_US : 0;
+    const int64_t off_delay=app_settings_staged_shutdown()?APP_LOCK_OFF_AFTER_US:1;
+    int64_t off_at=s_lock_sleep_touch&&!timeout_ms ? start+off_delay : 0;
     int64_t off_retry_at=off_at;
-    bool frame_marked=false;
+    bool frame_marked=false,frame_mark_attempted=false;
     unsigned light_failures=0;
     int64_t light_retry_at=0;
-    ESP_LOGI(TAG,"S31 lock wait: light then hardware off after 10min; usb=%u pickup=%u checkpoint=%u",
-        (unsigned)usb_was_blocked,(unsigned)pickup,(unsigned)s_lock_deep_ready);
+    ESP_LOGI(TAG,"S31 lock wait: off_delay_ms=%lld usb=%u pickup=%u checkpoint=%u",
+        (long long)(off_delay/1000),(unsigned)usb_was_blocked,(unsigned)pickup,(unsigned)s_lock_deep_ready);
     for(;;) {
         if(lock_take_key_wakeup()) { wake=APP_WAKE_KEY; break; }
+        bool usb=metalio_usb_blocks_sleep();
+        if (usb && !usb_was_blocked) metalio_usb_serial_reconnect();
+        // 充电暂缓关机；拔线后重新计满十分钟，不能执行充电期间已过期的截止时间。
+        // Charging defers shutdown; unplugging starts a fresh ten-minute interval.
+        if (usb && off_at) off_retry_at=off_at=esp_timer_get_time()+off_delay;
+        if (!usb && usb_was_blocked && off_at)
+            off_retry_at=off_at=esp_timer_get_time()+off_delay;
+        usb_was_blocked=usb;
         lock_resume_io_service();
         lock_resume_service();
         lock_hint_service();
-        if (!s_lock_hint.pending_at && !s_lock_hint.until && s_lock_sleep_touch && !pickup && !metalio_usb_blocks_sleep()) {
+        if (!s_lock_hint.pending_at && !s_lock_hint.until && s_lock_sleep_touch && !pickup && !usb) {
             if(off_at && esp_timer_get_time()>=off_retry_at && s_lock_deep_ready) {
-                if(s_lock_frame_cached && !lock_pin_enabled() && !frame_marked)
+                if(s_lock_frame_cached && !lock_pin_enabled() && !frame_marked && !frame_mark_attempted) {
+                    frame_mark_attempted=true;
                     frame_marked=pico_boot_mark_frame_cached()==ESP_OK;
+                }
                 esp_err_t err=app_enter_host_sleep(APP_SLEEP_OFF);
                 (void)lock_resume_media_io(0);
                 // 关机未完成仍保持锁定；30秒后重试，不因卡未挂载永远禁用关机。
@@ -363,8 +398,15 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeo
                 bool key=false;
                 int64_t wake_by=deadline;
                 if(off_at && s_lock_deep_ready && (!wake_by || off_retry_at<wake_by)) wake_by=off_retry_at;
-                esp_err_t err=lock_light_sleep_once(acc,s_lock_sleep_touch,&key,wake_by);
+                bool off_deadline=off_at && s_lock_deep_ready && wake_by==off_retry_at;
+                if(off_deadline && s_lock_frame_cached && !lock_pin_enabled() && !frame_marked && !frame_mark_attempted) {
+                    frame_mark_attempted=true;
+                    frame_marked=pico_boot_mark_frame_cached()==ESP_OK;
+                }
+                esp_err_t err=lock_light_sleep_once(acc,s_lock_sleep_touch,&key,wake_by,off_deadline);
                 if(key) { wake=APP_WAKE_KEY; break; }
+                if(off_deadline && err==ESP_ERR_TIMEOUT && esp_timer_get_time()>=off_retry_at)
+                    off_retry_at=esp_timer_get_time()+INT64_C(30000000);
                 // 为按键去抖/双击和提示保留窗口；一次中断或I/O失败不能整晚禁止浅睡。
                 // Leave time for debounce/double-click/hints; one IRQ or IO failure must not disable sleep all night.
                 static const unsigned retry_ms[]={1000,3000,10000,30000};
@@ -389,9 +431,6 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeo
                 last=now;last_valid=true;
             }
         }
-        bool usb=metalio_usb_blocks_sleep();
-        if (usb && !usb_was_blocked) metalio_usb_serial_reconnect();
-        usb_was_blocked=usb;
         if(deadline && esp_timer_get_time()>=deadline && !usb) { wake=APP_WAKE_TIMEOUT; break; }
         read_pico_clear_ioe_int();
         // 不重复操作低功耗/唤醒寄存器；每轮阻塞以保证按键、空闲任务和看门狗得到调度。
@@ -449,7 +488,21 @@ static uint64_t lock_light_sleep_slice_us(int64_t wake_by) {
     if(remaining<1) return 1;
     return remaining<INT64_C(60000000)?(uint64_t)remaining:UINT64_C(60000000);
 }
-static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t touch,bool *key_wake,int64_t wake_by) {
+// TF/字体已同步关闭且电源轨仍停放时直接断电，不先恢复LCD/TF/前光。
+// With media already closed/synced and rails parked, power off without reviving LCD/SD/light.
+static esp_err_t lock_power_off_parked(void) {
+    esp_err_t rtc=app_sync_time_to_pmu();
+    if(rtc!=ESP_OK && rtc!=ESP_ERR_INVALID_STATE) {
+        vTaskDelay(pdMS_TO_TICKS(20));rtc=app_sync_time_to_pmu();
+    }
+    if(rtc!=ESP_OK) ESP_LOGW(TAG,"S31 parked off RTC: %s; keep existing time",esp_err_to_name(rtc));
+    if(metalio_usb_blocks_sleep() || metalio_confirm_power_key())return ESP_ERR_INVALID_STATE;
+    metalio_frontlight(0,50);
+    metalio_poweroff();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    return ESP_ERR_TIMEOUT; // 实际断电不返回。/ An actual power cut never returns.
+}
+static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t touch,bool *key_wake,int64_t wake_by,bool off_at_deadline) {
     *key_wake=false;
     if (!touch || metalio_usb_blocks_sleep() || usb_storage_active() || pico_online_busy())
         return ESP_ERR_INVALID_STATE;
@@ -519,6 +572,18 @@ static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t tou
         }
         ESP_LOGI(TAG,"S31 light wake: maintenance=%u ext1=%u power_confirmed=%u result=%s",
             maintenance,(unsigned)key_irq,(unsigned)power_confirmed,esp_err_to_name(err));
+    }
+    if(err==ESP_OK && off_at_deadline && wake_by && esp_timer_get_time()>=wake_by &&
+       sd_closed && rails_cut && pins_prepared && keys_ready && !key_irq && !metalio_usb_blocks_sleep()) {
+        power_confirmed=metalio_confirm_power_key();
+        if(power_confirmed)key_irq=true;
+        else {
+            err=lock_power_off_parked();
+            // 断电未完成才恢复外设，仍保持锁屏；交接期间的新按键继续保留。
+            // Only a failed cut restores peripherals, retaining the lock and new physical input.
+            power_confirmed=metalio_confirm_power_key();
+            if(power_confirmed)key_irq=true;
+        }
     }
     if(pins_prepared) metalio_release_light_sleep_pins();
     (void)esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
@@ -766,6 +831,7 @@ void enter_lock_and_sleep(
     EpdiyHighlevelState* hl, int64_t* ignore_until_ms, sc7a20h_handle_t acc, cst836u_handle_t touch,
     bool reader_background
 ) {
+    const int64_t lock_at = esp_timer_get_time();
     // 先灭灯并消费本次锁屏动作；后续生成/推屏期间的新短按必须保留给唤醒。
     // Turn the lamp off and consume the initiating action before composition; retain later wake presses.
     metalio_frontlight(0, 50);
@@ -774,6 +840,7 @@ void enter_lock_and_sleep(
     // Refuse to interrupt an active upload. The caller repaints its page when
     // this function returns, and the user can lock again after the transfer.
     bool radio_paused = read_pico_transfer_pause_for_sleep();
+    const int64_t transfer_at = esp_timer_get_time();
     if (!radio_paused) {
         metalio_frontlight_restore();
         pico_boot_clear_resume();
@@ -786,19 +853,17 @@ void enter_lock_and_sleep(
         pico_boot_clear_resume();
         ESP_LOGW(TAG,"S31 lock postponed: BLE shutdown failed"); return;
     }
+    const int64_t radio_at = esp_timer_get_time();
     uint8_t* framebuffer = epd_hl_get_framebuffer(hl);
     // 仅清目标内存，旧页面在拼贴准备期间仍留在屏幕；不提前清白物理面板。
     // Clear only target memory; retain the old physical page until the complete collage is ready.
     epd_poweroff();
     uint8_t lock_style = app_settings_lock_style();
-    // 锁屏待机（不关机）也先整屏刷白一次：把上一屏差分刷新留下的浅态拉回饱和白，
-    // 锁屏画面再从干净白底叠上去，退出/唤醒后的黑度才稳定。
-    // 透明 PNG 先从最后成功帧合成，不能在合成前把目标内存铺白；合成后由图片出口清理物理旧态。
-    // Lock standby (no power-off) also starts with a full white refresh: the previous
-    // differential frame is pushed back to saturated white and the lock art is then
-    // composed from that clean base. The transparent-PNG cover style draws over the
-    // last presented page: preserve its target memory until composition, then clear the optical history through the image outlet.
-    if (lock_style != 3) guard_draw_result(hl, update_display_white(hl));
+    // 壁纸先在内存准备完整画面，再从真实back一次全像素GC48；不提前推白，也不伪造白底历史。
+    // 票根/拼贴保留既有擦白；透明PNG仍先从最后成功帧合成，再由图片出口清理物理旧态。
+    // Prepare wallpaper in memory and present once with full-pixel GC48 from actual back history.
+    // Retain ticket/collage whitening and transparent-PNG composition/optical cleanup.
+    if (lock_style == 0 || lock_style == 2) guard_draw_result(hl, update_display_white(hl));
     s_lock_frame_cached=false;
     // 透明书封以最后成功推屏的真实参考作为底图，不取未显示的目标。
     // Overlay the last successfully presented reference, never an uncommitted target.
@@ -823,8 +888,11 @@ void enter_lock_and_sleep(
         guard_draw_result(hl, result);
         result = lock_present_art(hl,lock_style);
     }
-    ESP_LOGI(TAG, "S31 lock style=%u GC48 result=%d push_ms=%lld", lock_style,
-        (int)result, (long long)((esp_timer_get_time() - draw_at) / 1000));
+    const int64_t presented_at = esp_timer_get_time();
+    ESP_LOGI(TAG, "S31 lock style=%u GC48 result=%d transfer_ms=%lld ble_ms=%lld prepare_ms=%lld push_ms=%lld visible_ms=%lld", lock_style,
+        (int)result, (long long)((transfer_at - lock_at) / 1000),
+        (long long)((radio_at - transfer_at) / 1000), (long long)((draw_at - radio_at) / 1000),
+        (long long)((presented_at - draw_at) / 1000), (long long)((presented_at - lock_at) / 1000));
     if (result != EPD_DRAW_SUCCESS && !lock_pin_enabled()) {
         // 推屏失败不宣布锁屏完成；恢复本页与灯光，允许再次尝试。
         // A failed presentation does not enter sleep; restore the page and lamp for another attempt.
@@ -845,8 +913,8 @@ void enter_lock_and_sleep(
     }
     // 密码启用时即使显示失败也保持验证边界，绝不回到未验证页面。
     // A display failure must never return an unauthenticated page when the PIN is enabled.
-    // 锁屏统一浅睡十分钟后同步RTC并硬件关机；保留密码和阅读检查点。
-    // Every lock light-sleeps ten minutes before RTC sync and hardware power-off, retaining PIN and reader checkpoints.
+    // 锁屏按所选策略定时或直接硬件关机；始终保留锁图、密码和阅读检查点。
+    // Apply the selected timed/immediate hardware-off policy, retaining artwork, PIN and reader checkpoints.
     ESP_LOGI(TAG, "lock LIGHT");
     epd_poweroff();
     s_lock_sleep_touch=touch;
@@ -886,7 +954,7 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             pico_boot_ready();pico_boot_hold_resume();
             // 单击硬件开机直接恢复；其他复位保持门禁，深睡只补记实际采样的按键。
             // Single-press hardware boots restore directly; other resets retain the gate and deep wakes require sampled power evidence.
-            if(!s_boot_power_on || app_settings_wake_presses()==2) {
+            if(!s_boot_power_on || !metalio_boot_power_key() || app_settings_wake_presses()==2) {
                 if(s_boot_power_wake && metalio_boot_power_key() && app_settings_wake_presses()==1)
                     read_pico_pmu_latch_power_wakeup();
                 lock_wait_for_unlock(NULL);
@@ -894,6 +962,9 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
         }
         lock_hint_end();
         (void)app_lock_resume_frame(NULL);
+        // 异常启动不自动续读，但真实解锁后可以消费已保留的锁定标记。
+        // Abnormal startup cannot resume books, but verified unlock can consume the retained lock marker.
+        if(pico_boot_lock_pending() && !pico_boot_has_resume())pico_boot_clear_resume();
         return;
     }
     // 卡挂载有界等待仅为了字体/锁屏图；没有卡仍必须验证。
@@ -917,4 +988,5 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     lock_hint_end();
     (void)app_lock_resume_frame(NULL);
     app_font_end_lock(&saved);
+    if(pico_boot_lock_pending() && !pico_boot_has_resume())pico_boot_clear_resume();
 }

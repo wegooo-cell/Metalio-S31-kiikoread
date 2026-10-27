@@ -34,6 +34,7 @@ typedef int esp_err_t;
 #define ESP_ERR_NOT_FOUND 4
 #define ESP_ERR_NOT_FINISHED 5
 #define ESP_ERR_NO_MEM 6
+#define ESP_ERR_NOT_SUPPORTED 7
 #define GPIO_NUM_38 38
 #define GPIO_NUM_20 20
 #define GPIO_NUM_21 21
@@ -73,7 +74,7 @@ static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void heap_caps_free(void *p){free(p);}
 static esp_err_t sdmmc_host_init_slot(int slot,const sdmmc_slot_config_t *config){(void)slot;(void)config;return ESP_OK;}
 static esp_err_t sdmmc_card_init(const sdmmc_host_t *host,sdmmc_card_t *card){(void)host;(void)card;return ESP_ERR_TIMEOUT;}
-static esp_err_t sdmmc_read_sectors(sdmmc_card_t *card,void *buffer,size_t start,size_t count){(void)card;(void)buffer;(void)start;(void)count;return ESP_ERR_TIMEOUT;}
+static esp_err_t sdmmc_read_sectors(sdmmc_card_t *card,void *buffer,size_t start,size_t count){(void)card;(void)start;assert(count==1);memset(buffer,0,512);return ESP_OK;}
 typedef pthread_mutex_t portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED PTHREAD_MUTEX_INITIALIZER
 #define portENTER_CRITICAL(p) assert(pthread_mutex_lock(p)==0)
@@ -117,8 +118,9 @@ static int mock_mkdir(const char* p,int mode){
 #include "../../components/read_pico/read_pico_sd.c"
 // 此测试验证拔卡生命周期；空间计数由 sd_probe_host_test 独立覆盖。
 // This fixture checks media lifecycle; allocation counting is covered by sd_probe_host_test.
-BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){(void)c;return 0xff;}
-int f_opendir(FF_DIR *root,const char *path){(void)root;(void)path;return 1;}
+BYTE ff_diskio_get_pdrv_card(const sdmmc_card_t *c){(void)c;return 0;}
+int f_opendir(FF_DIR *root,const char *path){(void)path;root->obj.fs=NULL;return FR_OK;}
+int f_readdir(FF_DIR *root,FILINFO *entry){(void)root;entry->fname[0]=0;return FR_OK;}
 int f_closedir(FF_DIR *root){(void)root;return FR_OK;}
 int ff_mutex_take(int drive){(void)drive;return 1;}
 void ff_mutex_give(int drive){(void)drive;}
@@ -234,7 +236,7 @@ int main(void) {
     status_error=ESP_ERR_TIMEOUT;
     for(int i=0;i<3;++i){test_now_us+=i?500000:2001000;read_pico_sd_poll_health();assert(pending);assert(read_pico_sd_sync()==ESP_ERR_NOT_FINISHED);finish_probe();}
     assert(read_pico_sd_needs_recovery()&&!read_pico_sd_io_ready());
-    assert(read_pico_sd_start_recovery()==ESP_OK);assert(!read_pico_sd_io_ready());finish_probe();
+    status_error=ESP_OK;assert(read_pico_sd_start_recovery()==ESP_OK);assert(!read_pico_sd_io_ready());finish_probe();
     assert(read_pico_sd_io_ready());status_error=ESP_OK;
     assert(read_pico_sd_sync()==ESP_OK&&!read_pico_sd_needs_recovery());
     test_now_us+=3000000;read_pico_sd_poll_health();assert(!pending);

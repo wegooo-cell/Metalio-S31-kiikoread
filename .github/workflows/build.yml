@@ -51,6 +51,7 @@ jobs:
           python3 tools/metalio_lock_key_host_test.py
           python3 tools/metalio_lock_resume_host_test.py
           python3 tools/metalio_mount_resume_host_test.py
+          python3 tools/metalio_wake_media_recovery_host_test.py
           python3 tools/metalio_power_choice_host_test.py
           python3 tools/settings_layout_font_host_test.py
           mkdir -p build/book-tests

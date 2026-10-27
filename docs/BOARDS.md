@@ -53,19 +53,57 @@ English: Try at most8 profiles: four-line40/40/20/10/5/1MHz, then single-line5/1
 
 English: Publish a mounted filesystem before scanning FAT allocation counts. File management draws its directory first and queries partition space during idle. Light wake restores LCD/touch before a bounded500ms media poll; existing services continue recovery. Do not stat/unload retained font faces while media is suspended, and repaint once recovery completes. Saved font choices and abnormal-boot fallback remain intact. The poll bound does not replace individual SD-command/file-reopen timeouts or guarantee recovery of faulty media.
 
-“关机睡眠”只保留“浅睡10分钟后关机”（默认）和“彻底断电”，不再单独选择锁屏省电方式。旧`lock_lp`值忽略，已明确保存的关机/睡眠选择仍保留；新选择在NVS提交成功后生效。日常短按及自动锁屏先浅睡十分钟，之后同步外挂PCF8563、关闭书籍和字体文件并同步卸载TF，再走原厂硬件关机脉冲。RTC仅保时，不设置闹钟或定时重新开机；无效系统时间不覆盖RTC。
+“关机睡眠”只保留“浅睡10分钟后关机”（默认）和“彻底断电”，不再单独选择锁屏省电方式。旧`lock_lp`值忽略，已明确保存的关机/睡眠选择仍保留；新选择在NVS提交成功后生效。短按及自动锁屏按此选项执行：默认浅睡十分钟后关机，或锁屏画面定稿后直接关机。十分钟到时保留最后成功显示的锁屏画面，TF/字体已关闭且供电停放时直接同步外挂PCF8563并发出原厂关机脉冲，不先恢复SD/LCD/前光；失败才完整回滚外设。滑动关机独立于该选项，先显示“kiikoread 已关机”再直接硬件断电。RTC仅保时，不设置闹钟或定时重新开机；无效系统时间不覆盖RTC。
 
 浅睡保留RAM、字形与阅读索引，使用Metalio原厂SD、TPS、屏总线、P17/GPIO2和断轨顺序。每个维护切片不超过60秒，最后一段按十分钟截止时间缩短，不反复挂载TF。真正按键优先于到时交接，定时不能解锁或点前光。共享EXT1中断不能单独补造短按：恢复按键方向和慢挂卡前两次有效P17低电平才确认，未确认或I2C读失败仍保持锁屏。真实按键释放与双击继续由原采样器消费；有密码仍须验证。
 
-USB、忙传输、活动挂载和不安全唤醒线暂缓浅睡；无卡且没有待重开句柄时可以浅睡，不必一直空转。没有成功保存的检查点不贸然自动关机。浅睡失败按1/3/10/30秒退避，硬件关机失败保持锁定、30秒后重试；文件关闭/同步失败不发关机脉冲，按键事务拒绝时保留真实输入。关机不切换字体、不改设置；重新硬件开机后单击模式直接恢复，有密码/双击继续门禁，软件复位与未确认的深睡唤醒不能直接放行。超短按若未被采样确认可能需要再按，不能为避免漏按而把共享中断当真实按键。异常启动字体保护不变，另从校验通过的原NVS记录保留锁屏门禁，不能因禁用自动开书而直接进入首页；NVS格式不变。
+恢复输入方向后，按键扫描也须相隔30ms两次有效P17低电平才承接已有按住，避免单次低电平在随后松开时伪造短按。启动日志的`reasons`位掩码用于定位字体恢复保护：`0x01`异常复位、`0x02`NVS读取/记录校验失败、`0x04`上次启动未完成、`0x08`开书中断、`0x10`检查点写入失败；原因可组合，保护策略与NVS格式不变。
+
+English: After input directions are restored, require two valid P17-low samples30ms apart before inheriting a held key; a single low must not become a synthetic release click. Startup `reasons` is a diagnostic bitmask: `0x01` abnormal reset, `0x02` NVS read/record validation, `0x04` incomplete startup, `0x08` interrupted book opening, `0x10` checkpoint write failure. Causes may combine; policy and persisted format remain unchanged.
+
+S31在开机门禁前保留已校验的锁定记录，防止恢复启动期间再次复位丢失锁定意图。异常启动仍禁止自动开书与字体恢复；真实按键/PIN门禁完成后才清理不能自动恢复的锁定标记，正常续读仍先持久化消费入口再开书，不改变记录格式。
+
+English: S31 retains a validated durable lock record before the boot gate so another startup reset cannot discard lock intent. Abnormal starts still prohibit automatic book/font recovery. Clear non-resumable lock intent only after the real-key/PIN gate completes; normal resume is still persistently consumed before opening, with the record format unchanged.
+
+充电/USB期间暂缓锁屏自动关机，拔线后重新计算所选等待时长，不执行充电期间已到期的截止时间。USB、忙传输、活动挂载和不安全唤醒线暂缓浅睡；无卡且没有待重开句柄时可以浅睡，不必一直空转。没有成功保存的检查点不贸然自动关机。浅睡失败按1/3/10/30秒退避，硬件关机失败保持锁定、30秒后重试；文件关闭/同步失败不发关机脉冲，按键事务拒绝时保留真实输入。关机不切换字体、不改设置；重新硬件开机且尽早两次采样确认P17按下时，单击模式才直接恢复，有密码/双击继续门禁，软件复位与未确认的深睡唤醒不能直接放行。超短按若未被采样确认可能需要再按，不能为避免漏按而把共享中断当真实按键。异常启动字体保护不变，另从校验通过的原NVS记录保留锁屏门禁，不能因禁用自动开书而直接进入首页；NVS格式不变。
+
+S31壁纸锁屏先在内存中准备完整16灰画布，再从最后成功显示的真实参考帧直接执行一轮原厂GC48，省去独立白屏预刷；文件管理/设置的黑白输出策略不影响壁纸灰阶。仅成功推屏后提交壁纸与锁屏缓存，推屏失败重试和PIN门禁保持。票根、拼贴反馈及透明书封的既有清理流程保留。
 
 S31浅睡SDK兼容模块来自[Metalio官方2.0.66](https://github.com/CloudZao/Metalio-E-INK4-Plus/commit/2c1e5efba74f9ffd6f7d72e348011308e53f39a1)，源固定为`ad8edf4150a688737c0d7c00cae4413079b262ef`中的`s31_sleep`，保留MIT许可。恢复MPLL模拟校准前置条件与12/12偏置、PSRAM/XTAL/MPLL时钟交接，保留看门狗和CPU/PSRAM睡眠配置，只编译工程内SDK兼容副本，不修改全局SDK。RTC RAM阶段记录与复位原因在启动后有界重放，区分真实唤醒和复位恢复；这里的RTC RAM诊断与外挂PCF8563保时是不同用途。此项只适用于S31，不能移植寄存器参数到Pico。
 
-English: S31 offers default light sleep for ten minutes followed by PCF8563 sync and hardware power-off, or immediate complete power-off. Close/sync book/font/SD before the vendor power pulse, retaining saved selections and checkpoints; RTC preserves time without alarm wake. No-card/no-handle standby is allowed, while busy media/USB/unsafe IRQ defer sleep. Retain bounded slices, retries and PIN/double gates. Shared EXT1 alone cannot grant unlock: verify physical P17 twice before restoring inputs/media. Very short unobserved presses may require another press. Single-press hardware boots resume directly; software resets and unconfirmed deep wakes remain gated, and abnormal-font protection stays intact. The MIT vendor2.0.66 sleep module backports MPLL calibration/bias and PSRAM clock handoff through project-local SDK sources, preserving watchdogs and board isolation. Delayed reset/RTC-RAM traces distinguish wake from reboot; external RTC timekeeping is separate. Current draw, actual ten-minute power-off and wake/media/USB behavior still require hardware validation.
+English: S31 offers default light sleep for ten minutes followed by PCF8563 sync and hardware power-off, or immediate complete power-off. Close/sync book/font/SD before the vendor power pulse, retaining saved selections and checkpoints; RTC preserves time without alarm wake. No-card/no-handle standby is allowed, while busy media/USB/unsafe IRQ defer sleep. Retain bounded slices, retries and PIN/double gates. Shared EXT1 alone cannot grant unlock: verify physical P17 twice before restoring inputs/media. Very short unobserved presses may require another press. Single-press hardware boots resume directly only with early verified P17 evidence; software resets and unconfirmed deep wakes remain gated, and abnormal-font protection stays intact. The MIT vendor2.0.66 sleep module backports MPLL calibration/bias and PSRAM clock handoff through project-local SDK sources, preserving watchdogs and board isolation. Delayed reset/RTC-RAM traces distinguish wake from reboot; external RTC timekeeping is separate. Current draw, actual ten-minute power-off and wake/media/USB behavior still require hardware validation.
 
 S31同步Pico PR46–49的设置控件、密码白底与标题提示排版。密码页可点按切换“关闭/5分钟/1小时/8小时/24小时”宽限期，默认关闭，档位存入S31自身NVS命名空间；只在本次锁屏的真实电源键浅睡唤醒后检查当前有效时钟。共享中断、定时、触摸和USB不授予免密资格；到期、无效时间、时钟回拨及硬件重新开机仍需密码。冷启动不复用旧宽限，异常启动字体保护、十分钟RTC同步硬件关机与PIN门禁保持独立。密码层先在内存铺白供按钮采样，入场一次输出；等待及取消恢复原锁图，不额外全刷。
 
 English: S31 adopts Pico PR46–49 control/PIN/notice presentation. Optional PIN grace cycles off/5min/1h/8h/24h, defaults off and uses the S31 NVS namespace. Recheck valid current time only after a real power-key light wake in this lock session; timers/shared IRQ/USB/touch cannot grant grace. Expiry, invalid/rollback time, hardware reboot and abnormal-start protection retain authentication. Sample PIN buttons on white memory, present once, and retain artwork while waiting/cancelling without extra full scans.
+
+### S31本地刷机启动核对
+
+本地POSIX刷机工具可调用`tools/s31_controlled_restart.py`，前提是已核对MAC、分区、实际启动槽、应用完整内容与保留数据，并已请求原生esptool下载复位。必须核对真实启动日志，不能仅凭工具显示“watchdog reset”推断固件的复位原因；本机该命令也实测报告过正常POWERON。若目标项目/版本/ELF匹配、保护原因全部为零且UI就绪，直接结束，不再额外重启。
+
+只有此次受控更新的首次启动明确为WDT、且唯一保护原因是异常复位时，才在UI安全就绪后执行一次普通USB复位，再核对同一应用启动、保护归零及UI就绪。原有异常判定不变，不写恢复记录；启动/开书中断、NVS读写错误、重复启动、应用身份不符、诊断缺失或超时均停止，不自动重试复位。PIN/锁定门禁未通过时也不因等待而放行。原生刷机后必须以校验及启动记录为准，不把辅助脚本完成等同于实屏/睡眠验收。
+
+English: The optional POSIX local updater verifies real startup evidence after a guarded native reset. A matching clean POWERON/USB boot needs no extra reset. Only the controlled update's sole WDT-reset protection cause may receive one ordinary USB reset after safe UI readiness, followed by build/cause/UI verification. Retain all firmware protections; missing diagnostics, dirty startup/book records, NVS failures, repeated boots, identity mismatch and timeouts stop without reset retries or record edits. A waiting lock/PIN gate is never bypassed.
+
+### S31首次短按冷开机实验
+
+显式`--s31-early-power-key`才启用，默认关闭，仅S31。引导程序在自身初始化前只读TCA9555的方向、反相及P1.7，要求两次有效低电平相隔约30ms；NACK、总线不空闲、时钟超时、方向/反相不符均不提供按键凭据。只操作GPIO0/1的有界开漏读事务，不使用共享GPIO2判断按键，不改扩展器输出/方向、前光、RTC时间或持久配置。
+
+配套应用用SDK的`.rodata_custom_desc`声明自己的32字节RTC noinit记录区。项目包装`bootloader_load_image`，先完整执行原SDK校验和加载，成功且描述符/芯片/分区/地址范围均匹配后才传递记录；不得覆盖已加载的代码/数据或SDK顶部保留区。没有协议的旧镜像不接收记录，原OTA选择/回退不变，不增加或移动SDK RTC预留区。初始化前的采样保存在已初始化的引导程序data段，不依赖尚未清零的BSS。
+
+应用开头即消费并清空记录，仅当前真实POWERON且校验有效的按键凭据可与后续真实P1.7采样合并。单击、双击、PIN和异常字体保护继续沿现有门禁；WDT/USB/定时/其他复位不继承旧按键凭据。此实验需要配套应用和引导程序，单写应用不能保证修复首次短按。完整编译及宿主测试不替代断USB十分钟后的实际开机测试，不能将ROM阶段之前已经松开的按键凭空补记。
+
+English: Explicit S31-only early-key experiments sample real P17 before bootloader init, retain stable evidence in initialized data, and hand it only to a successfully validated/loaded image declaring an app-owned RTC noinit record. Legacy images receive no handoff and SDK RTC layout, slot selection and rollback remain unchanged. Consume once at app entry; retain single/double/PIN/crash guards and reject all non-POR/stale/fault evidence. Install the paired images for hardware testing; normal builds remain OFF.
+
+### S31媒体恢复顺序
+
+先挂卡并完成只读扇区及FAT根目录验证，才发布可读状态；未通过验证的档位不记忆，按既有四线降频/单线序列有界回退。TF可同时打开文件上限16，当前字体槽优先恢复；闲置字体失败保留待恢复状态，不阻塞当前字体与书架。健康检查不因字体恢复失败而停止。
+
+浅睡重开连续三次失败后，先等待封面/头像任务释放并关闭页面书籍、全部字体槽（含部分已恢复句柄），再失效旧VFS会话，由主循环安排异步重挂。挂卡期间不重开字体、不抢USB模拟盘/OTA/字体下载/传书会话；验证新会话后重新尝试保存的字体路径，不改变设置。异常启动的内建字体保护继续独立生效。
+
+前光的PWM为零后才保持GPIO6/7，恢复外设不会释放这两脚；只有真实解锁/通过启动门禁后，先设置期望PWM再解除保持。硬件初始化不提前恢复已保存亮度。极短开机按键未被采到时可能需再按一次，不能把上电复位或共享中断当作解锁证据。上述顺序的回归与完整编译不能替代实机挂卡成功率、充电兼容性和功耗测量。
+
+English: S31 verifies actual sector IO and the FAT root before publishing a mount, retaining existing bounded clock/one-bit fallback and remembering only verified profiles. Sixteen open-file slots and active-face-first resume prevent idle faces from blocking media. Three failed wake resumes yield to worker quiescence and full consumer closure before asynchronous remount; fonts wait for verified media, with USB/OTA/transfer owners respected and saved paths/abnormal-boot protection retained. Explicit slider shutdown displays the powered-off message; timed lock shutdown preserves artwork and cuts from parked peripherals without a revive/remount cycle. Charging defers automatic off and unplug starts a fresh selected interval. Zero-duty GPIO6/7 holds survive restoration until authorized unlock; startup stays dark until its gate passes. Hardware acceptance, current and recovery rates remain to be measured.
 
 ## S31 AI快捷键
 

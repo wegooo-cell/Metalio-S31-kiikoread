@@ -23,7 +23,7 @@ bool pico_boot_recovery(void);
 /// 只观察恢复检查点，不消费也不改写Flash。/ Inspect the resume checkpoint without consuming it or writing Flash.
 bool pico_boot_has_resume(void);
 #if KIIKO_BOARD_METALIO47
-/// 异常启动禁用自动开书，但不能因此丢失先前锁定状态。/ Abnormal boots disable book resume without discarding the prior lock gate.
+/// 门禁前重复复位仍保留锁定；真实解锁或成功消费恢复入口后解除。/ Retain the lock across resets before the gate; clear after verified unlock or successful resume consumption.
 bool pico_boot_lock_pending(void);
 #endif
 /// 仅刚刚保存成功的实际锁屏可用作下次深睡启动参考。/ Only a successfully persisted actual lock frame may seed the next deep-sleep boot reference.

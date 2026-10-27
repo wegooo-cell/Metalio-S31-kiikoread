@@ -57,6 +57,9 @@ bool read_pico_sd_io_ready(void);
 /// Call after all consumers release handles; ESP_OK means queued, NOT_FINISHED means another lifecycle owner is busy.
 esp_err_t read_pico_sd_start_recovery(void);
 #if KIIKO_BOARD_METALIO47
+/// 所有消费者关闭后标记I/O会话失效；不卸载、不写卡，忙时交由下轮重试。
+/// After consumers close, invalidate the IO session without unmounting/writing; retry if busy.
+esp_err_t read_pico_sd_invalidate_io(void);
 /// Explicit recovery after consumers close; also handles failed initial mounts and paused wake IO.
 /// ESP_OK queues an asynchronous close/remount, NOT_FINISHED leaves the current lifecycle owner intact.
 esp_err_t read_pico_sd_start_manual_recovery(void);

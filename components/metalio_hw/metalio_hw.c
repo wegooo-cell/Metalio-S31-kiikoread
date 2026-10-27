@@ -21,6 +21,15 @@
 #include "esp_private/esp_gpio_reserve.h"
 #include "soc/gpio_sig_map.h"
 #include <stdatomic.h>
+#include "sdkconfig.h"
+#include "metalio_early_key_record.h"
+#if CONFIG_METALIO_EARLY_POWER_KEY
+#include "esp_attr.h"
+static RTC_NOINIT_ATTR metalio_early_key_record_t s_boot_key_handoff;
+const __attribute__((section(".rodata_custom_desc"),used)) metalio_early_key_app_desc_t metalio_early_key_app_desc={
+    .magic=METALIO_EARLY_KEY_DESC_MAGIC,.version=1,.board=METALIO_EARLY_KEY_BOARD,
+    .address=(uint32_t)(uintptr_t)&s_boot_key_handoff,.size=sizeof(s_boot_key_handoff)};
+#endif
 
 static const char *TAG="metalio_hw";
 static i2c_master_bus_handle_t bus;
@@ -32,6 +41,7 @@ static SemaphoreHandle_t mutex;
 static uint8_t outputs[2]={0x20,0x14};
 static bool tps_on;
 static bool boot_power_key;
+static bool early_boot_power_key;
 static bool tps_prepared;
 static int64_t tps_wake_us;
 static int tps_last_vcom_mv=-1;
@@ -154,6 +164,17 @@ bool metalio_confirm_power_key(void) {
     return metalio_io_read(&again)==ESP_OK && !(again&(1u<<15));
 }
 bool metalio_boot_power_key(void) { return boot_power_key; }
+void metalio_capture_boot_power_key(void) {
+    early_boot_power_key=false;
+#if CONFIG_METALIO_EARLY_POWER_KEY
+    metalio_early_key_record_t record;
+    early_boot_power_key=metalio_early_key_take(&s_boot_key_handoff,
+        (unsigned)esp_reset_reason(),&record);
+    ESP_LOGI(TAG,"early boot key: pressed=%d protocol=%lu reason=%lu flags=%lu samples=0x%04lx config=0x%04lx",
+        early_boot_power_key,(unsigned long)record.version,(unsigned long)record.reason,
+        (unsigned long)record.flags,(unsigned long)record.samples,(unsigned long)record.config);
+#endif
+}
 void metalio_volume_sample(uint16_t inputs,int64_t now_ms) {
     static uint16_t stable=0xffff,candidate=0xffff;
     static int64_t since;
@@ -332,9 +353,10 @@ esp_err_t metalio_hw_init(void) {
     if (err==ESP_OK) err=fca9555_set_config(ioe,0,0xc0);
     if (err==ESP_OK) err=fca9555_set_config(ioe,1,0xe3);
     if (err!=ESP_OK) return err;
-    // 深睡启动尽早采样真实P17，后续挂卡/字体耗时不能用共享IRQ代替按键。
-    // Sample real P17 early on deep boots; later media/font delays cannot turn a shared IRQ into a press.
-    if(esp_reset_reason()==ESP_RST_DEEPSLEEP)boot_power_key=metalio_confirm_power_key();
+    // 硬件/深睡启动尽早采样真实P17，后续挂卡/字体耗时不能用共享IRQ代替按键。
+    // Sample real P17 early on hardware/deep boots; later media/font delays cannot turn a shared IRQ into a press.
+    if(esp_reset_reason()==ESP_RST_DEEPSLEEP || esp_reset_reason()==ESP_RST_POWERON)
+        boot_power_key=(esp_reset_reason()==ESP_RST_POWERON && early_boot_power_key) || metalio_confirm_power_key();
     // P14 VOUT 上电后按参考驱动等待轨稳定。/ Allow reference VOUT rail settling time.
     vTaskDelay(pdMS_TO_TICKS(80));
     ledc_timer_config_t timer={.speed_mode=LEDC_LOW_SPEED_MODE,.duty_resolution=LEDC_TIMER_10_BIT,
@@ -351,7 +373,9 @@ esp_err_t metalio_hw_init(void) {
         uint8_t enabled=1; nvs_get_u8(h,"enabled",&enabled); nvs_close(h);
         atomic_store(&haptic_enabled,enabled!=0);
     }
-    metalio_frontlight_restore();
+    // 未通过锁屏/密码门禁前保持灭灯，供电复位不能短暂点亮。
+    // Stay dark until the boot lock/PIN gate completes; a power reset must not flash the light.
+    metalio_frontlight(0,50);
     if(xTaskCreate(haptic_worker,"metalio_haptic",2048,NULL,3,&haptic_task)!=pdPASS)
         ESP_LOGW(TAG,"Haptic worker unavailable");
     ESP_LOGI(TAG,"Metalio V1.5 S31: TCA9555 ready; frontlight=%s",fl_ready?"ready":"unavailable");
@@ -373,7 +397,11 @@ static void frontlight_apply_position(unsigned brightness,unsigned warmth) {
     ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_1);
 }
 void metalio_frontlight_restore(void) {
+    if(!fl_ready)return;
     frontlight_apply_position(light_enabled?brightness_position:0,warmth_position);
+    // 先恢复目标PWM，再释放浅睡的低电平保持，定时关机不经过这里。
+    // Program the desired PWM before releasing sleep's low holds; timed off never calls this.
+    gpio_hold_dis(GPIO_NUM_6);gpio_hold_dis(GPIO_NUM_7);
 }
 // 兼容旧版以亮度0表示关闭的设置；新开关独立保存，重启/唤醒不能擅自开灯。
 // Migrate legacy zero-as-off settings; persist the independent switch across boot/wake.
@@ -543,6 +571,11 @@ esp_err_t metalio_prepare_light_sleep_pins(void) {
 }
 esp_err_t metalio_hold_for_light_sleep(void) {
     esp_err_t result=ESP_OK;
+    // 入睡前PWM已置零并等待120ms，LEDC脚只保持，不改其复用配置。
+    // PWM has settled at zero for120ms; hold LEDC pads without remapping them.
+    esp_err_t light= gpio_hold_en(GPIO_NUM_6);
+    if(light==ESP_OK)light=gpio_hold_en(GPIO_NUM_7);
+    if(light!=ESP_OK)result=light;
     for(unsigned i=0;i<sizeof(light_sleep_pins)/sizeof(light_sleep_pins[0]);i++) {
         esp_err_t err=gpio_hold_en(light_sleep_pins[i]);
         if(result==ESP_OK) result=err;

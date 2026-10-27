@@ -23,7 +23,7 @@ typedef struct{bool mounted;}read_pico_sd_info_t;
 typedef struct{unsigned marker;}app_lock_font_t;
 enum EpdDrawError{EPD_OK=0,EPD_BAD=1};
 static uint8_t front[BYTES],back[BYTES],panel[BYTES],style;
-static bool pin,cached,valid,mounted,draw_ok,scan_ok;
+static bool pin,cached,valid,mounted,draw_ok,scan_ok,system_binary;
 static bool lock_pin_enabled(void){return pin;}
 static unsigned remaining,probes,reads,draws,scans,saves,marks,fonts,clears,power,censuses,white_push,fallback;
 static EpdiyHighlevelState *s_lock_hint_hl,*s_boot_lock_hl;
@@ -41,7 +41,8 @@ static bool draw(uint8_t *fb,unsigned expected){assert(style==expected);++draws;
 static bool book_ticket_draw(uint8_t *fb,bool bg){assert(!bg);return draw(fb,0);}
 static bool book_lock_collage_prepare(uint8_t *fb){return draw(fb,2);}
 static bool draw_wallpaper(uint8_t *fb){return draw(fb,1);}
-static enum EpdDrawError update_display_full(EpdiyHighlevelState *h){assert(h->back_fb==back);++scans;if(!scan_ok)return EPD_BAD;memcpy(panel,front,BYTES);memcpy(back,front,BYTES);return EPD_OK;}
+static bool display_system_binary_set(bool enabled){bool old=system_binary;system_binary=enabled;return old;}
+static enum EpdDrawError update_display_full(EpdiyHighlevelState *h){assert(h->back_fb==back);if(style==1)assert(!system_binary);++scans;if(!scan_ok)return EPD_BAD;memcpy(panel,front,BYTES);memcpy(back,front,BYTES);return EPD_OK;}
 static enum EpdDrawError update_display_image_gray(EpdiyHighlevelState *h){assert(style==3);++clears;return update_display_full(h);}
 static void guard_draw_result(EpdiyHighlevelState *h,enum EpdDrawError err){(void)h;(void)err;}
 static void epd_poweroff(void){}

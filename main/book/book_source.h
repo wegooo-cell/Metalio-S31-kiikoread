@@ -61,6 +61,7 @@ esp_err_t book_chapter_image_dimensions(size_t chapter, const char *src, unsigne
 
 /// 浅睡仅暂停只读文件，不释放排版和章节索引。/ Pause read handles without discarding layout/indexes.
 esp_err_t book_suspend_io(void);
+bool book_io_pending(void);
 esp_err_t book_resume_io(void);
 /// 空闲时有界准备下一章压缩数据，不加载字体或改变当前排版。
 /// Bounded idle preparation of the next compressed chapter, without loading faces/changing layout.

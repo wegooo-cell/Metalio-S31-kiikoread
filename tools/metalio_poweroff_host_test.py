@@ -20,7 +20,9 @@ typedef struct{bool mounted;}read_pico_sd_info_t;
 #define ESP_ERR_NOT_FINISHED -3
 #define pdMS_TO_TICKS(x) (x)
 #define ESP_LOGW(...) ((void)0)
-static bool s_lock_io_pending,s_lock_io_no_media,card,closed,paused,key_pending,cut_success;
+static bool s_lock_io_pending,s_lock_io_no_media,card,closed,paused,key_pending,cut_success,usb;
+static bool metalio_usb_blocks_sleep(void){return usb;}
+static bool metalio_confirm_power_key(void){return key_pending;}
 static int rtc_error,failure;
 static unsigned rtc,book,font,closes,key_pauses,pulses,remounts,resumes,haptics,clock_ms;
 static jmp_buf poweroff;
@@ -41,10 +43,10 @@ static int lock_resume_media_io(unsigned wait){assert(wait==500&&!closed);++resu
 static void metalio_haptic_resume(void){++haptics;}
 '''
 source=root/'main/sleep.c'
-unit+=function('lock_power_off',source)+'\n'
+unit+=function('lock_power_off',source)+'\n'+function('lock_power_off_parked',source)+'\n'
 unit+=r'''
 static void reset(void){
- s_lock_io_pending=s_lock_io_no_media=closed=paused=key_pending=cut_success=false;card=true;
+ usb=s_lock_io_pending=s_lock_io_no_media=closed=paused=key_pending=cut_success=false;card=true;
  rtc_error=failure=0;rtc=book=font=closes=key_pauses=pulses=remounts=resumes=haptics=clock_ms=0;
 }
 int main(void){
@@ -62,6 +64,16 @@ int main(void){
  reset();cut_success=true;
  if(!setjmp(poweroff)){(void)lock_power_off();assert(!"hardware power cut unexpectedly returned");}
  assert(pulses==1&&paused&&closed&&!remounts&&!resumes);
+ // Execute the real parked handoff: RTC and pulse only, no media/rail/lamp restore.
+ reset();closed=paused=true;book=font=1;cut_success=true;
+ if(!setjmp(poweroff)){lock_power_off_parked();assert(0);}
+ assert(rtc==1&&pulses==1&&!closes&&!remounts&&!resumes&&closed&&paused);
+ reset();closed=paused=true;book=font=1;usb=true;
+ assert(lock_power_off_parked()==ESP_ERR_INVALID_STATE&&!pulses&&!remounts);
+ reset();closed=paused=true;book=font=1;key_pending=true;
+ assert(lock_power_off_parked()==ESP_ERR_INVALID_STATE&&!pulses&&!remounts);
+ reset();closed=paused=true;book=font=1;rtc_error=-4;
+ assert(lock_power_off_parked()==ESP_ERR_TIMEOUT&&rtc==2&&pulses==1&&!remounts&&!resumes);
  puts("PASS: actual S31 RTC-first hardware-off transaction, bounded RTC retry, absent card, pending-key cancellation, file/flush faults and returning-power rollback");
 }
 '''

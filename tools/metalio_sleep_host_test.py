@@ -16,6 +16,7 @@ enum {APP_WAKE_NONE,APP_WAKE_KEY,APP_WAKE_PICKUP,APP_WAKE_TIMEOUT};
 typedef void *sc7a20h_handle_t;
 typedef struct {int x_mg,y_mg,z_mg;unsigned status;} sc7a20h_sample_t;
 #define ESP_OK 0
+#define ESP_ERR_TIMEOUT -2
 #define ESP_LOGW(tag,...) do {if(0)printf(__VA_ARGS__);} while(0)
 static const char *esp_err_to_name(int e){(void)e;return "error";}
 #define APP_SLEEP_OFF 1
@@ -34,25 +35,28 @@ static int pico_boot_mark_frame_cached(void){++cached_marks;return cached_error;
 static unsigned light_calls,deep_calls;
 static int64_t clock_us,light_step;
 static bool deep_success;static jmp_buf deep_jump;
+static bool staged=true;
 static bool light_key,light_fail;
 static int64_t recover_at;
 static int64_t esp_timer_get_time(void);
-static int lock_light_sleep_once(void*a,void*t,bool*k,int64_t until){
+static int lock_light_sleep_once(void*a,void*t,bool*k,int64_t until,bool off_at_deadline){
+ (void)off_at_deadline;
  (void)a;(void)t;light_calls++;
  int64_t step=light_step;if(until&&clock_us+step>until)step=until>clock_us?until-clock_us:0;
  clock_us+=step;*k=light_key||(recover_at>=0&&clock_us>=recover_at);return light_fail&&!*k?-1:0;
 }
 static int lock_resume_media_io(unsigned ms){assert(ms==0);return 0;}
-static int app_enter_host_sleep(int m){assert(m==APP_SLEEP_OFF);assert(clock_us>=APP_LOCK_OFF_AFTER_US);deep_calls++;if(deep_success)longjmp(deep_jump,1);return -1;}
+static int app_enter_host_sleep(int m){assert(m==APP_SLEEP_OFF);assert(clock_us>=(staged?APP_LOCK_OFF_AFTER_US:1));deep_calls++;if(deep_success)longjmp(deep_jump,1);return -1;}
 typedef int esp_err_t;
 static bool book_cover_jobs_quiesce(unsigned ms){assert(ms==2000);return true;}
 static bool ui_avatar_quiesce(unsigned ms){assert(ms==2000);return true;}
 #define pdMS_TO_TICKS(ms) (ms)
 #define ESP_LOGI(...) ((void)0)
-static int64_t key_at,plug_at=-1;
+static int64_t key_at,plug_at=-1,unplug_at=-1;
 static int frontlight_calls,motion_reads,sensor_on,sensor_off,reconnects,scheduler_yields;
 static unsigned last_wake;
 static bool pickup,usb,powered,stale_motion;
+static bool app_settings_staged_shutdown(void){return staged;}
 static int64_t esp_timer_get_time(void){return clock_us;}
 static bool app_settings_pickup_wake(void){return pickup;}
 static int sc7a20h_power_up(void *a){assert(a);sensor_on++;return ESP_OK;}
@@ -62,7 +66,7 @@ static void metalio_frontlight(unsigned b,unsigned w){assert(!b&&w==50);frontlig
 static void metalio_frontlight_restore(void){frontlight_calls++;}
 static void lock_resume_io_service(void){}
 static bool lock_take_key_wakeup(void){return key_at>=0&&clock_us>=key_at;}
-static bool metalio_usb_blocks_sleep(void){return usb||powered||(plug_at>=0&&clock_us>=plug_at);}
+static bool metalio_usb_blocks_sleep(void){return (unplug_at<0||clock_us<unplug_at)&&(usb||powered||(plug_at>=0&&clock_us>=plug_at));}
 static void metalio_usb_serial_reconnect(void){++reconnects;}
 static void read_pico_clear_ioe_int(void){}
 static void vTaskDelay(int ms){assert(ms==30);scheduler_yields++;clock_us+=(int64_t)ms*1000;}
@@ -71,7 +75,7 @@ static void app_settings_set_last_wake(unsigned source){last_wake=source;}
 unit+='static void lock_resume_service(void){}\n'
 unit+=function('app_light_sleep_wait_timed',root/'main/sleep.c')
 unit+=r'''
-static void reset(void){hint_window=false;s_lock_hint.pending_at=s_lock_hint.until=0;clock_us=0;recover_at=key_at=plug_at=-1;frontlight_calls=motion_reads=sensor_on=sensor_off=reconnects=scheduler_yields=0;pickup=usb=powered=stale_motion=false;light_calls=deep_calls=cached_marks=0;light_step=0;deep_success=false;cached_error=0;pin=s_lock_frame_cached=s_lock_io_pending=false;light_key=light_fail=s_lock_deep_ready=false;s_lock_sleep_touch=NULL;}
+static void reset(void){staged=true;hint_window=false;s_lock_hint.pending_at=s_lock_hint.until=0;clock_us=0;recover_at=key_at=plug_at=unplug_at=-1;frontlight_calls=motion_reads=sensor_on=sensor_off=reconnects=scheduler_yields=0;pickup=usb=powered=stale_motion=false;light_calls=deep_calls=cached_marks=0;light_step=0;deep_success=false;cached_error=0;pin=s_lock_frame_cached=s_lock_io_pending=false;light_key=light_fail=s_lock_deep_ready=false;s_lock_sleep_touch=NULL;}
 static void settled(void){assert(frontlight_calls==(last_wake==APP_WAKE_NONE?1:2));}
 int main(void){
  reset();assert(app_light_sleep_wait_timed(NULL,1000)==APP_WAKE_TIMEOUT&&last_wake==APP_WAKE_NONE&&scheduler_yields==34);settled();
@@ -115,6 +119,17 @@ int main(void){
  assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&light_calls==6);settled();
  reset();s_lock_sleep_touch=(void*)1;s_lock_io_pending=true;key_at=500000;
  assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!light_calls);settled();
+ // A cable held for more than ten minutes must not cause immediate shutdown on unplug.
+ reset();s_lock_sleep_touch=(void*)1;s_lock_deep_ready=true;usb=true;unplug_at=720000000;light_step=60000000;deep_success=true;
+ if(!setjmp(deep_jump)){app_light_sleep_wait_timed(NULL,0);assert(0);}
+ assert(deep_calls==1&&clock_us>=1320000000&&clock_us<1320100000);
+ // Charging is not an unlock; a real key works while VBUS remains present.
+ reset();s_lock_sleep_touch=(void*)1;s_lock_deep_ready=true;usb=true;key_at=900000000;
+ assert(app_light_sleep_wait_timed(NULL,0)==APP_WAKE_KEY&&!deep_calls&&!light_calls);
+ // The immediate-off lock option also takes the owned power-off path, never an unlock.
+ reset();s_lock_sleep_touch=(void*)1;s_lock_deep_ready=true;staged=false;light_step=60000000;deep_success=true;
+ if(!setjmp(deep_jump)){app_light_sleep_wait_timed(NULL,0);assert(0);}
+ assert(deep_calls==1&&clock_us<100000&&frontlight_calls==1);
  puts("PASS: production S31 10min actual wait handoff model, no early power-off, PIN/art checkpoint boundaries, key priority, USB exclusion, power-off refusal then bounded retry, transient light recovery");
 }
 '''

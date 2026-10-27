@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import warnings
 import zipfile
+from zip_fixture_helpers import with_local_extra
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,6 +61,28 @@ def main():
         good = archive(payload)
         cd = good.index(b"PK\x01\x02")
         eocd = good.rindex(b"PK\x05\x06")
+
+        # 用户书籍的局部头预留；中央目录、32位尺寸、解压边界及CRC继续严格校验。
+        # User-book local placeholder; central directory, 32-bit sizes, inflate bounds and CRC stay strict.
+        padding = struct.pack('<HHQQ', 1, 16, 0, 0)
+        for method in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            padded = with_local_extra(archive(payload, method), padding)
+            run('read', padded, expected=payload)
+            run('prefix', padded, expected=payload)
+            for malformed in (padding + padding, struct.pack('<HHQ', 1, 8, 0),
+                              padding[:-1], struct.pack('<HHQQ', 1, 16, 1, 0),
+                              struct.pack('<HHQQ', 1, 16, 0, 1)):
+                run('reject-extract', with_local_extra(archive(payload, method), malformed))
+            for field, value in ((18, 0xffffffff), (22, 0xffffffff), (14, 0)):
+                corrupt = bytearray(padded)
+                struct.pack_into('<I', corrupt, field, value)
+                run('reject-extract', corrupt)
+            corrupt = bytearray(padded)
+            central = corrupt.index(b'PK\x01\x02')
+            struct.pack_into('<I', corrupt, 14, 42)
+            struct.pack_into('<I', corrupt, central + 16, 42)
+            run('reject-extract', corrupt)
+        run('reject-extract', with_local_extra(archive(payload, stream=True), padding))
 
         # Some EPUB producers set general-purpose bit 4 even on valid DEFLATE and stored entries.
         # 有些 EPUB 同时为合法的压缩和直存条目标记 bit 4，仍需逐条解压并核对 CRC。

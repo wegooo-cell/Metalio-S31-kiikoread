@@ -142,5 +142,8 @@ esp_err_t book_resume_io(void) {
     s_book.file = file; s_io_suspended = false;
     return ESP_OK;
 }
+// EPUB恢复由其ZIP对象管理；非空EPUB保守地视为仍需媒体。
+// EPUB owns its ZIP state; conservatively require media while that object exists.
+bool book_io_pending(void) { return s_io_suspended || s_epub != NULL; }
 #else
 #endif
