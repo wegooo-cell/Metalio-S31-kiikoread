@@ -4240,7 +4240,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             if (s_reader_fullscreen) image_area = ui_rect_union(image_area, reader_fullscreen_progress_area());
             else if (s_reader_footer_pending) image_area = ui_rect_union(image_area, progress_rect());
         }
-        err = update_display_gray_transition(ctx->hl, image_area);
+        // 章首/图文页也走同一套柔和差分：只推变化像素、整屏一次输出，不再走整页灰阶过渡。
+        // Chapter-start/image pages use the same soft difference: changed pixels only,
+        // one whole-panel output instead of a full-page gray transition.
+        (void)image_area;
+         err = update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(),
+                                             MODE_GL16,
+                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     }
 #else
     else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
@@ -4316,7 +4322,11 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
 #endif
 #if KIIKO_BOARD_METALIO47
             : s_reader_turn_pending && s_mode==MODE_GL16
-                ? update_display_text_turn(ctx->hl, turn_area, E0470_TURN_RTL)
+                // 普通文字翻页也走 Pico 那套柔和差分：等灰全保持（黑不刷新）、变白补四相擦白、整屏一次输出。
+                // Ordinary text turns use the same soft difference as Pico: equal pairs held (black not
+                // refreshed), four whitening phases for pixels turning white, one whole-panel output.
+                ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), s_mode,
+                                                (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT})
 #else
             : s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
               s_view == READING && s_presented_view == (int)READING &&
@@ -4331,7 +4341,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
                 ? update_display_area_diff_with(ctx->hl,
 #if KIIKO_BOARD_METALIO47
-                    s_reader_turn_pending ? display_reader_text_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
+                     display_reader_soft_turn_waveform(), s_mode,
+                     s_reader_turn_pending ? (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT} : turn_area)
 #else
                     s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
 #endif

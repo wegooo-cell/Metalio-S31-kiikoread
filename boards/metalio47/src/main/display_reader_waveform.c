@@ -4,8 +4,10 @@
  *         with equal pairs held by the derived table.
  */
 #include "display_reader_waveform.h"
+#include "display_main_waveform.h"
 #include "e0470_epaper_waveform.h"
 #include <stddef.h>
+#include <string.h>
 #if KIIKO_S31_FAST_READER_PANELS
 #ifdef ESP_PLATFORM
 #include "esp_attr.h"
@@ -14,7 +16,15 @@
 #define PANEL_LUT_ATTR
 #endif
 #endif
-const EpdWaveform* display_reader_text_waveform(void) { return &E0470_TEXTTURN_WAVEFORM; }
+// GL37 面板表本身已是 16 级、等值全保持的正文序列；启用时直接用它做普通翻页表，
+// 比完整 GL48 少 11 相、比四级22相实验多出真实抗锯齿灰阶。
+// The GL37 panel profile is already a 16-level, equal-held body sequence: use it for ordinary
+// turns when available -- eleven fewer scans than GL48 and real antialiasing levels instead of
+// the four-level22-phase experiment.
+const EpdWaveform* display_reader_text_waveform(void) {
+    const EpdWaveform* panel37=display_reader_panel37_waveform();
+    return panel37?panel37:&E0470_TEXTTURN_WAVEFORM;
+}
 
 const EpdWaveform* display_reader_fast_text_waveform(void) {
     static const EpdWaveformPhases* ranges[1];
@@ -135,4 +145,72 @@ const EpdWaveform* display_reader_panel_gray4_waveform(bool erase_underlay) {
     (void)erase_underlay;
     return NULL;
 #endif
+}
+
+/* ---- 普通翻页柔和差分 / Soft ordinary page turn ----
+ * 厂商 GL16 原序（右对齐、前导保持），等灰全部保持；只为“变成白”的像素补四相擦白，
+ * 并把该四相插在厂商末尾全保持相之前，扫描仍以保持收尾。静态容量按完整 GL48 + 4 相。
+ * Vendor GL16 order with every equal pair held; four whitening phases are pushed only for
+ * pixels turning white and inserted BEFORE the vendor's trailing all-hold phases so the scan
+ * still ends on a hold. Static capacity covers the full GL48 plus the four phases.
+ */
+#define READER_SOFT_TURN_EXTRA 6
+static uint8_t s_soft_turn[E0470_FULL_GL16_FRAMES + READER_SOFT_TURN_EXTRA][16][4];
+static EpdWaveformPhases s_soft_turn_phases;
+static const EpdWaveformPhases* s_soft_turn_ranges[1];
+static EpdWaveformMode s_soft_turn_mode;
+static const EpdWaveformMode* s_soft_turn_modes[1];
+static EpdWaveform s_soft_turn_waveform;
+static bool s_soft_turn_ready;
+
+static void soft_turn_set(int phase,int to,int from,int action){
+    const int shift=6-2*(from%4);
+    uint8_t *p=&s_soft_turn[phase][to][from/4];
+    *p=(uint8_t)((*p&~(3u<<shift))|((unsigned)action<<shift));
+}
+
+const EpdWaveform* display_reader_soft_turn_waveform(void){
+    if(s_soft_turn_ready)return &s_soft_turn_waveform;
+    // 优先用 GL37 面板表（16 级、37 相）；不可用时回退完整 GL48。
+    // Prefer the GL37 panel table (16 levels, 37 phases); fall back to full GL48.
+    const EpdWaveform *base=&E0470_WAVEFORM;
+    const EpdWaveform *panel37=display_reader_panel37_waveform();
+    if(panel37)base=panel37;
+    const EpdWaveformPhases *gl=e0470_waveform_phases(base,MODE_GL16);
+    if(!gl||!gl->luts||gl->phase_times||gl->phases+READER_SOFT_TURN_EXTRA>
+        (int)(sizeof(s_soft_turn)/sizeof(s_soft_turn[0])))return &E0470_WAVEFORM;
+    int hold=0;
+    while(hold<gl->phases){
+        const int f=gl->phases-1-hold;
+        int nonzero=0;
+        for(int to=0;to<16&&!nonzero;++to)
+            for(int from=0;from<16;++from)
+                if(e0470_phase_action(gl,f,to,from)){nonzero=1;break;}
+        if(nonzero)break;
+        ++hold;
+    }
+    if(hold<1)return &E0470_WAVEFORM;
+    if(hold>4)hold=4;
+    const int drive=gl->phases-hold;
+    memcpy(s_soft_turn,gl->luts,(size_t)drive*16*4);
+    memcpy(s_soft_turn+drive+READER_SOFT_TURN_EXTRA,(const uint8_t*)gl->luts+(size_t)drive*16*4,
+           (size_t)hold*16*4);
+    for(int f=0;f<drive;++f)for(int v=0;v<16;++v)soft_turn_set(f,v,v,0);
+    for(int i=0;i<READER_SOFT_TURN_EXTRA;++i)
+        for(int to=0;to<16;++to)
+            for(int from=0;from<16;++from)
+                // 所有目标为白的像素都推白（含本来也白的空白区），配合差分清理上一页灰底。
+                // Whiten every pixel whose target is white, including blanks that were already
+                // white, so the previous page's gray floor clears in the same difference pass.
+                soft_turn_set(drive+i,to,from,to==15?2:0);
+    s_soft_turn_phases=(EpdWaveformPhases){gl->phases+READER_SOFT_TURN_EXTRA,
+                                           (const uint8_t*)s_soft_turn,NULL};
+    s_soft_turn_ranges[0]=&s_soft_turn_phases;
+    s_soft_turn_mode=(EpdWaveformMode){MODE_GL16,1,s_soft_turn_ranges};
+    s_soft_turn_modes[0]=&s_soft_turn_mode;
+    s_soft_turn_waveform=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,
+                                       .mode_data=s_soft_turn_modes,
+                                       .temp_intervals=base->temp_intervals};
+    s_soft_turn_ready=true;
+    return &s_soft_turn_waveform;
 }
