@@ -61,7 +61,7 @@ int main(int argc,char **argv){
  assert(allocations==(KIIKO_S31_READER_PANEL37?1:0));
  const EpdWaveform *binary=&E0470_FULL_WAVEFORM;
 #if KIIKO_S31_DU14
- binary=e0470_du14_waveform();
+ binary=display_du14_white_waveform();
 #endif
  const EpdWaveformPhases *du=e0470_waveform_phases(binary,MODE_DU);
  unsigned char old_du[24*64];assert(du&&du->phases<=20);memcpy(old_du,du->luts,(size_t)du->phases*64);

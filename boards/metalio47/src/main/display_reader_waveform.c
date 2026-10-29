@@ -38,7 +38,7 @@ const EpdWaveform* display_reader_fast_text_waveform(void) {
     static EpdWaveform waveform;
     if(phases.luts)return &waveform;
 #if KIIKO_S31_DU14
-    const EpdWaveform *base=e0470_du14_waveform();
+    const EpdWaveform *base=display_du14_white_waveform();
     const int expected=14;
 #else
     const EpdWaveform *base=&E0470_FULL_WAVEFORM;
