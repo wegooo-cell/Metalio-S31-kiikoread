@@ -29,6 +29,7 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define portMAX_DELAY 0
 #define E0470_TURN_FAST_TICK_US 11090
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
+typedef int EpdWaveform;
 static int soft_waveform;
 static const int *display_reader_soft_turn_waveform(void){return &soft_waveform;}
 static struct{bool valid;}s_reader_panel_frame;
@@ -99,6 +100,7 @@ static bool reader_slider_feedback_present(app_ctx_t *ctx,app_redraw_t redraw){(
 unit+='static bool reader_panel_short_ready(app_redraw_t r){return test_panel_short&&r==APP_REDRAW_PAGE;}\nstatic bool reader_panel_fast_present(app_ctx_t *ctx,app_redraw_t redraw){(void)ctx;(void)redraw;return false;}\nstatic void reader_panel_record(enum EpdDrawError err){(void)err;}\nstatic bool display_page_prepare_begin(void){return false;}\nstatic void display_page_prepare_end(bool held){(void)held;}\n'
 for name in ('reader_area','reader_fullscreen_progress_area','progress_rect'):
  unit+=function(name,root/'main/apps/app_book.c')+'\n'
+unit+=function('reader_soft_present',root/'main/apps/app_book.c')+'\n'
 unit+=function('present',root/'main/apps/app_book.c')
 unit+=r'''
 static void reset(void){
@@ -121,7 +123,7 @@ int main(void){
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_reader_footer_pending=!full;
   assert(present(&ctx,APP_REDRAW_AREA));
-  assert(calls==1&&selected==13&&last_gray_wave==&soft_waveform&&s_reader_text_frame);
+  assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16&&s_reader_text_frame);
   assert(!s_reader_footer_pending&&!s_reader_cleanup);
  }
  // 速读必须进入独立DU出口；普通/图像不能误用该路径。/ FastBW must reach its separate DU outlet; ordinary/images must not.
@@ -146,14 +148,14 @@ int main(void){
  reset();s_reader_panel=READER_PANEL_FONT_SETTINGS;s_reader_turn_pending=s_reader_footer_pending=false;test_panel_short=true;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==21&&rendered==0); // local UI: no footer replay
  reset();fail=1;s_reader_footer_pending=false;
- present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_reader_text_frame);
+ present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==14&&!s_reader_text_frame);
  reset();s_water_turn_pending=true;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(selected==18&&calls==1&&!s_water_turn_pending);
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_water_turn_pending=true;
   s_area=(EpdRect){0,160,684,900};
   present(&ctx,APP_REDRAW_AREA);assert(selected==18&&calls==1&&!s_water_turn_pending);
-  assert(last_water_area.y==160&&last_water_area.y+last_water_area.height==(full?1216:1192));
+  assert(last_water_area.x==0&&last_water_area.y==0&&last_water_area.width==684&&last_water_area.height==1216);
  }
  s_area=(EpdRect){0,0,684,1216};
  reset();fail=1;s_water_turn_pending=true;
@@ -163,7 +165,7 @@ int main(void){
   reset();tick=effect;immersive=hide_status;s_reader_fullscreen=full;s_reader_footer_pending=!full;s_reader_turn_pending=false;
   images=kind!=2;s_reader_image_refresh_pending=images!=0;s_reader_image_exit_pending=kind!=0;
   present(&ctx,APP_REDRAW_AREA);
-  assert(calls==1&&selected==13&&last_gray_wave==&soft_waveform);
+  assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16);
   assert(last_gray_area.x==0&&last_gray_area.width==684&&last_gray_area.y==0);
   assert(last_gray_area.height==1216);
   assert(s_reader_image_frame==(images!=0)&&s_reader_text_frame==!images&&!s_reader_image_exit_pending);
@@ -176,11 +178,11 @@ int main(void){
   if(!kind)assert(last_gray_mode==MODE_GC16&&last_gray_wave==&E0470_FULL_WAVEFORM&&last_gray_area.y==0&&last_gray_area.height==1216);
  }
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_turn_pending=false;
- present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==13&&last_gray_wave==&soft_waveform&&last_gray_area.y==0&&last_gray_area.height==1216);
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==14&&last_gray_wave==&soft_waveform&&last_gray_mode==MODE_GL16&&last_gray_area.y==0&&last_gray_area.height==1216);
  // A failed image/exit output cannot become either displayed-image history or a text-only fast baseline.
  for(int exit=0;exit<2;++exit){
   reset();fail=1;images=!exit;s_reader_image_refresh_pending=!exit;s_reader_image_exit_pending=exit;
-  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_reader_image_frame&&!s_reader_text_frame);
+  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==14&&!s_reader_image_frame&&!s_reader_text_frame);
  }
  reset();images=1;hide_images=true;s_reader_turn_pending=false;s_reader_fullscreen=false;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(!s_reader_image_frame);

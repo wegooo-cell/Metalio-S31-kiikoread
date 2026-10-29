@@ -50,6 +50,11 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
 static const EpdWaveform soft_gray = {4};
 static const EpdWaveform reader_soft = {5};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
+const EpdWaveform* display_reader_water_waveform(void) {return &reader_soft;}
+// 本组隔离波形工厂；实际擦白LUT由pico_main_clean_host_test逐迁移覆盖。/ Isolate waveform factories here; pico_main_clean_host_test covers real whitening LUTs.
+const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white) {
+    assert(wave&&(mode==MODE_GL16||mode==MODE_DU)&&white>=6&&white<=8);return wave;
+}
 const EpdWaveform* display_main_water_waveform(void) {return &soft_gray;}
 const EpdWaveform* display_main_normal_waveform(void) { return display_main_water_waveform(); }
 const EpdWaveform* display_main_ui_waveform(void) {return display_main_normal_waveform();}

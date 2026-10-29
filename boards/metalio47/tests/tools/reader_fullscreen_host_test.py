@@ -73,6 +73,9 @@ static void free_book(void){assert(!draw_locked);s_text=NULL;}
 static size_t book_chapter_count(void){return 2;}
 static bool load_chapter(app_ctx_t *ctx,size_t chapter,int off,bool last){(void)ctx;(void)off;if(load_failed)return false;s_chapter=chapter;s_page=last?book_layout_page_count()-1:0;return true;}
 static void set_reader_view(int view){s_view=view;}
+// 目录实现另有真实源测试；这里记录边界失败返回的当前位置。/ TOC has its own source tests; track the failed-turn anchor here.
+static size_t current_toc_position(void){return s_chapter;}
+static int book_toc_open(size_t current){assert(current==s_chapter);return (int)current;}
 static void skip_hidden_image_pages(app_ctx_t *ctx,int dir){(void)ctx;(void)dir;}
 static uint8_t app_settings_reader_full_pages(void){return full_pages;}
 static int effect=1;
