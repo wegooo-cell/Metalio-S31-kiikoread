@@ -3,8 +3,10 @@ English: Actual acrylic cache pixel equivalence and allocation-fault regressions
 SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
-import re,subprocess,tempfile
+import re,subprocess,tempfile,argparse
 r=Path(__file__).resolve().parents[1]
+a=argparse.ArgumentParser();a.add_argument('--render-input',type=Path);a.add_argument('--render-output',type=Path);args=a.parse_args()
+if bool(args.render_input)!=bool(args.render_output):a.error('render requires both input and output')
 def function(file,name):
  t=(r/file).read_text();scan=re.sub(r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',lambda m:' '*len(m[0]),t)
  m=re.search(r'^(?:static )?(?:void|int|bool|uint8_t|EpdRect) '+name+r'\([^;{}]*?\)\s*\{',scan,re.M);assert m,name
@@ -16,8 +18,14 @@ a=quick.index("code=r'"+"''")+len("code=r'"+"''");b=quick.index("'"+"''",a)
 code=quick[a:b].split('static uint8_t ui_contrast_gray')[0]
 code=code.replace('assert(x==xx);for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);','if(x==xx){for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);}else{assert(y==yy);for(;x<=xx;++x)epd_draw_pixel(x,y,gray,fb);}')
 code+=r"""
+static void epd_draw_line(int x,int y,int xx,int yy,uint8_t gray,uint8_t *fb){
+ if(x==xx){if(y>yy){int v=y;y=yy;yy=v;}for(;y<=yy;++y)epd_draw_pixel(x,y,gray,fb);}
+ else{assert(y==yy);if(x>xx){int v=x;x=xx;xx=v;}for(;x<=xx;++x)epd_draw_pixel(x,y,gray,fb);}
+}
 static void ui_fill_rect_fast(EpdRect r,uint8_t gray,uint8_t *fb){epd_fill_rect(r,gray,fb);}
-static int contrast=100,guard_draws;
+static int contrast=100,guard_draws,style=2;
+static int app_settings_shelf_style(void){return style;}
+static void heap_caps_free(void *p){free(p);}
 static size_t free_psram=5u*1024u*1024u;
 static int s_view;
 enum {SHELF,MANAGE};
@@ -29,16 +37,31 @@ static void *heap_caps_malloc(size_t bytes,unsigned caps){assert(caps==3);++allo
 for n in ('ui_contrast_gray','ui_read_pixel','ui_acrylic_bw_rect','ui_hairline','draw_frosted'):
  code+=function('main/ui/ui_kit.c',n)
 code+='static void ui_draw_acrylic_guard(uint8_t *fb,EpdRect r){++guard_draws;draw_frosted(fb,r,false); }\n'
+code=re.sub(r'^static void ui_draw_round_rect[^\n]*\n','',code,flags=re.M)
+for n in ('clamp_radius','draw_arc','ui_draw_round_rect'):
+ code+=function('main/ui/ui_kit.c',n)
+code+=re.sub(r'^#include[^\n]*\n','',(r/'main/ui/ui_glass.c').read_text(),flags=re.M)
+code+=function('main/ui/ui_kit.c','ui_draw_liquid_shelf_rail').replace('void ui_draw_liquid_shelf_rail(', 'static void liquid_rail(')
+code+='static void ui_draw_liquid_shelf_rail(uint8_t *fb,EpdRect r){++guard_draws;liquid_rail(fb,r); }\n'
 code+=function('main/ui/ui_kit.c','ui_rotate_rect_to_fb')
 t=(r/'main/apps/app_book.c').read_text();a=t.index('#define SHELF_GUARD_CACHE_BYTES');b=t.index('static EpdRect row_rect',a);code+=t[a:b]
 code+=r"""
 static void seed(unsigned value){for(unsigned i=0;i<BYTES;++i)frame[i]=(uint8_t)(i*13+value*19);}
-static void reference(EpdRect rect){ui_draw_acrylic_guard(saved,rect);if(fast)ui_acrylic_bw_rect(saved,rect);}
-int main(void){
- for(rotation=0;rotation<4;++rotation)for(int mode=0;mode<2;++mode){
+static void reference(EpdRect rect){if(style==6)ui_draw_liquid_shelf_rail(saved,rect);else ui_draw_acrylic_guard(saved,rect);if(fast)ui_acrylic_bw_rect(saved,rect);}
+int main(int argc,char **argv){
+ if(argc==3){
+  rotation=1;style=6;fast=false;FILE *in=fopen(argv[1],"rb");assert(in);memset(frame,255,BYTES);
+  for(int y=0;y<1216;++y)for(int x=0;x<684;++x){int c=fgetc(in);assert(c>=0);epd_draw_pixel(x,y,(uint8_t)c,frame);}assert(fgetc(in)==EOF);fclose(in);
+  for(int row=0;row<3;++row)draw_shelf_guard(frame,(EpdRect){20,192+row*282+188,644,42},row);
+  FILE *out=fopen(argv[2],"wb");assert(out);
+  for(int y=0;y<1216;++y)for(int x=0;x<684;++x)assert(fputc(ui_read_pixel(frame,x,y)*17,out)!=EOF);
+  assert(!fclose(out));release_guard_cache();return 0;
+ }
+ assert(argc==1);
+ for(style=2;style<=6;style+=4)for(rotation=0;rotation<4;++rotation)for(int mode=0;mode<2;++mode){
   fast=mode;release_guard_cache();
   for(int row=0;row<3;++row){
-   EpdRect rect={20,328+row*104,644,90};
+   EpdRect rect={20,328+row*104,644,style==6?42:90};
    seed(row);memcpy(again,frame,BYTES);memcpy(saved,frame,BYTES);reference(rect);
    draw_shelf_guard(frame,rect,row);assert(!memcmp(frame,saved,BYTES));
    memcpy(frame,again,BYTES);int before=guard_draws;draw_shelf_guard(frame,rect,row);
@@ -50,15 +73,25 @@ int main(void){
   }
  }
  release_guard_cache();rotation=3;fast=true;
- for(int failure=0;failure<2;++failure){
+ for(style=2;style<=6;style+=4)for(int failure=0;failure<2;++failure){
   release_guard_cache();oom=failure==0;free_psram=failure?100000:5u*1024u*1024u;
-  EpdRect rect={20,328,644,90};seed(42);memcpy(saved,frame,BYTES);reference(rect);draw_shelf_guard(frame,rect,0);
+  EpdRect rect={20,328,644,style==6?42:90};seed(42);memcpy(saved,frame,BYTES);reference(rect);draw_shelf_guard(frame,rect,0);
   assert(!s_guard_cache&&!memcmp(frame,saved,BYTES));
  }
- release_guard_cache();puts("PASS: actual acrylic output matches uncached pixels in four rotations, gray/BW, source/contrast invalidation, bounded memory and OOM fallback");
+ release_guard_cache();oom=false;free_psram=5u*1024u*1024u;fast=false;
+ EpdRect thin={20,380,644,42};seed(3);memcpy(again,frame,BYTES);style=2;draw_shelf_guard(frame,thin,0);
+ memcpy(frame,again,BYTES);memcpy(saved,again,BYTES);style=6;reference(thin);int previous=guard_draws;
+ draw_shelf_guard(frame,thin,0);assert(guard_draws==previous+1&&!memcmp(frame,saved,BYTES));
+ for(int y=0;y<epd_rotated_display_height();++y)for(int x=0;x<epd_rotated_display_width();++x)
+  if(x<thin.x||x>=thin.x+thin.width||y<thin.y||y>=thin.y+thin.height)
+   assert(ui_read_pixel(frame,x,y)==ui_read_pixel(again,x,y));
+ release_guard_cache();puts("PASS: actual acrylic/liquid output matches uncached pixels in four rotations, gray/BW, source/contrast invalidation, bounded memory and OOM fallback");
 }
 """
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'cache.c';p.write_text(code);out=Path(d)/'cache'
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-O2','-fsanitize=address,undefined','-Imain',str(p),'main/ui/ui_image_dither.c','-o',str(out)],cwd=r,check=True)
+ subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-O2','-fsanitize=address,undefined','-Imain',str(p),'main/ui/ui_image_dither.c','-lm','-o',str(out)],cwd=r,check=True)
  subprocess.run([str(out)],check=True)
+
+ if args.render_input:
+  subprocess.run([str(out),str(args.render_input.resolve()),str(args.render_output.resolve())],check=True)

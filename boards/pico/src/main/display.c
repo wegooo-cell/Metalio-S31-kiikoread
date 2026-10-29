@@ -21,6 +21,8 @@
  * 用户修订：书架顶部文字、框线与封面/亚克力一起使用水波纹，不再拆分顶部差分刷新；底栏仍固定。
  * User revision: shelf headers, frames, covers and acrylic share one ripple instead of a separate header differential; navigation remains fixed.
 
+ * 用户2026-10-28要求根页残影优化：显式Pico实验追加两拍变白、一拍释放；保留本机表、40相上限、底栏和其他场景。
+ * User requests root ghosting improvements: explicit Pico experiment adds two changed-white drives/one release within this board's40-phase cap, retaining its tables/navigation and other scenes.
  * 用户修订：普通书架上下文字区和中间书架区同一轮逐相输出，外侧柔和、封面/材质保留校准灰阶，留白仅向白擦除；不串行呈现分区。仅横条可变，底栏图标固定，保留统一故障恢复。
  * User revision: ordinary shelf chrome and art share each scan phase, with soft outer text, calibrated covers/furniture and directional whitespace erasure; never reveal regions serially. Only the marker may change within frozen navigation; retain common fault recovery.
  * 用户修订：纯文字水波纹复用柔和文字序列，保持未变灰边、减轻先粗后浅；8带/11090us、最终灰阶、主页水波纹和故障恢复保持。
@@ -51,6 +53,13 @@
 
 static const char* TAG = "read_pico";
 static bool s_bulk_io;
+static unsigned s_main_quality;
+unsigned display_main_quality_set(unsigned white_phases){
+    unsigned prior=s_main_quality;
+    s_main_quality=white_phases==6 || white_phases==8 ? white_phases : 0;
+    return prior;
+}
+
 static bool s_full_refresh_requested;
 void display_request_full_refresh(void) { s_full_refresh_requested = true; }
 static int s_pclk_mhz = DISPLAY_PCLK_DEFAULT_MHZ;
@@ -298,7 +307,8 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     // The BW/exit tables hold every equal pair. Include only the changing marker
     // in this scan; frozen divider/labels/icons receive no drive. This removes
     // an additional comparison and eight-frame serial marker update.
-    bool marker_with_body=fast&&changed&&!cache&&!gray_fallback;
+    bool marker_with_body=changed&&!cache&&
+        ((fast&&!gray_fallback)||changing_page);
     EpdRect body_area=main_body_area();
     if(marker_with_body)body_area.height=UI_NAV_MARKER_SCAN_END;
     if (cache) main_band_copy(hl, cache, false);
@@ -319,6 +329,8 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
     }
     const bool shelf_regions=normal&&changed&&s_main_band_count&&(changing_page||body_full);
     if(shelf_regions){marker_with_body=true;body_area.height=UI_NAV_MARKER_SCAN_END;}
+    const bool clean_switch=s_main_quality&&changed&&changing_page&&!body_full;
+    if(clean_switch)body_wave=display_main_clean_waveform_with_phases(body_wave,body_mode,s_main_quality);
     use_scan_for(body_wave, body_mode);
     epd_poweron();
     epd_hl_waveform(hl, body_wave);
@@ -331,13 +343,16 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         EpdRect last=s_main_bands[s_main_band_count-1];
         int top=s_main_bands[0].y&~31,bottom=(last.y+last.height+31)&~31;
         if(bottom>UI_NAV_REFRESH_END)bottom=UI_NAV_REFRESH_END;
+        const EpdWaveform *soft=display_main_normal_waveform(),*art=display_main_shelf_waveform(body_full?MODE_GC16:MODE_GL16);
+        if(clean_switch){soft=display_main_clean_waveform_with_phases(soft,MODE_GL16,s_main_quality);art=display_main_clean_waveform_with_phases(art,MODE_GL16,s_main_quality);}
         *result=e0470_update_regions(hl,body_area,(EpdRect){0,top,body_area.width,bottom-top},
-            display_main_normal_waveform(),display_main_shelf_waveform(body_full?MODE_GC16:MODE_GL16),
-            body_full?MODE_GC16:MODE_GL16);
+            soft,art,body_full?MODE_GC16:MODE_GL16);
         if(*result==EPD_DRAW_NO_PHASES_AVAILABLE){
             // 低内存仍一次输出整张目标；不退回分段等待或更改真实back。
             // Low memory still presents the whole target once, without serial waiting or a fabricated baseline.
-            epd_hl_waveform(hl,display_main_normal_waveform());
+            const EpdWaveform *fallback=display_main_normal_waveform();
+            if(clean_switch)fallback=display_main_clean_waveform_with_phases(fallback,MODE_GL16,s_main_quality);
+            epd_hl_waveform(hl,fallback);
             *result=epd_hl_update_area(hl,MODE_GL16,25,body_area);
         }
     } else if (water && changing_page && changed) {
@@ -345,11 +360,11 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
         // Water outputs the final gray target directly, without a BW prepass or a second whole-page gray update; common recovery handles failure.
         read_pico_epd_use_scan(READ_PICO_EPD_SCAN_FAST);
         epd_lcd_set_prefill_lines(127);
-        EpdRect ripple = main_body_area();
+        EpdRect ripple = body_area;
         const int prior_tick=e0470_page_turn_tick_us();
         e0470_page_turn_set_tick_us(E0470_TURN_FAST_TICK_US);
         *result = e0470_page_turn_with_waveform_compact(hl, ripple, E0470_TURN_RTL,
-                                                       display_main_water_waveform(), E0470_TURN_FAST_BANDS);
+                                                       clean_switch?display_main_clean_waveform_with_phases(display_main_water_waveform(),MODE_GL16,s_main_quality):display_main_water_waveform(), E0470_TURN_FAST_BANDS);
         e0470_page_turn_set_tick_us(prior_tick);
         if (*result == EPD_DRAW_NO_PHASES_AVAILABLE) {
             use_scan_for(body_wave, MODE_GL16);
@@ -370,7 +385,9 @@ static bool main_begin(EpdiyHighlevelState* hl, enum EpdDrawError* result) {
             EpdRect gray = {0, s_main_bands[0].y, epd_rotated_display_width(), last.y + last.height - s_main_bands[0].y};
             // 采用原校准迁移，不自行按灰度比例截帧；等灰无需反复推动。
             // Retain calibrated transitions without scaling pulses by gray distance; equal grays need no repeated drive.
-            epd_hl_waveform(hl, display_main_gray_waveform());
+            const EpdWaveform *gray_wave=display_main_gray_waveform();
+            if(clean_switch)gray_wave=display_main_clean_waveform_with_phases(gray_wave,MODE_GL16,s_main_quality);
+            epd_hl_waveform(hl,gray_wave);
             use_scan_for(display_main_gray_waveform(), MODE_GL16);
             *result = epd_hl_update_area(hl, MODE_GL16, 25, gray);
         }
@@ -678,7 +695,7 @@ static enum EpdDrawError update_display_reader_turn_unlocked(EpdiyHighlevelState
 
 static enum EpdDrawError update_display_water_turn_unlocked(EpdiyHighlevelState* hl, EpdRect area,
                                              e0470_turn_dir_t dir) {
-    return update_display_reader_turn_unlocked(hl,area,dir,E0470_TURN_FAST_BANDS,display_reader_text_waveform());
+    return update_display_reader_turn_unlocked(hl,area,dir,E0470_TURN_FAST_BANDS,display_reader_water_waveform());
 }
 
 // 供数不足时的兜底：把频率退回安全值，整屏白一次，让后面的差分刷有干净参考帧。

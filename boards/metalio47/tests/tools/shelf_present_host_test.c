@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#define KIIKO_BOARD_METALIO47 1
 #include "e0470_page_turn.h"
 #include "e0470_epaper_waveform.h"
 
@@ -27,7 +28,7 @@ static const uint8_t* const* mapped_luts;
 static const int *mapped_starts,*mapped_ends;
 static const int8_t* mapped_selectors;
 static int mapped_count,scans,fail_at,differences,powerons;
-static bool full_cleanup;
+static bool full_cleanup,du_chrome,native_area;
 static EpdRect expected_area={0,0,H,1120},expected_art={0,192,H,800};
 int water_test_alloc_fail;
 int epd_width(void){return W;}
@@ -38,7 +39,7 @@ void epd_poweron(void){++powerons;}
 int64_t esp_timer_get_time(void){return 0;}
 void esp_rom_delay_us(uint32_t us){assert(!us);}
 const EpdWaveformPhases* e0470_waveform_phases(const EpdWaveform* wave,int mode){
-    if(wave==&soft_wave){assert(mode==MODE_GL16);return &soft;}
+    if(wave==&soft_wave){assert(mode==MODE_GL16||mode==MODE_DU);if(du_chrome&&mode==MODE_GL16)return NULL;assert(mode==(du_chrome?MODE_DU:MODE_GL16));return &soft;}
     assert(wave==&E0470_WAVEFORM);
     assert(mode==MODE_GL16||mode==MODE_GC16);
     return mode==MODE_GC16?&cleanup:&art;
@@ -69,19 +70,29 @@ enum EpdDrawError epd_draw_base(EpdRect area,const uint8_t* pixels,EpdRect crop,
     enum EpdDrawMode mode,int temperature,const bool* lines,const uint8_t* columns,
     const EpdWaveform* wave){
     assert(area.width==W&&area.height==H&&crop.width==W&&crop.height==H);
+    if(native_area){
+        assert(mode==(MODE_PACKING_1PPB_DIFFERENCE|MODE_GC16)&&temperature==25&&wave==&E0470_WAVEFORM);
+        assert(pixels==diff&&!mapped_luts&&!memcmp(back,old,BYTES));
+        for(int y=0;y<H;++y)assert(lines[y]);
+        for(int x=0;x<W;++x){
+            bool driven=(columns[x/2]>>((x&1)*4))&15;
+            assert(driven==(x>=expected_area.y&&x<expected_area.y+expected_area.height));
+        }
+        ++scans;return fail_at?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS;
+    }
     assert(mode==(MODE_PACKING_1PPB_DIFFERENCE|MODE_DU)&&temperature==25&&wave==&E0470_APPLY_WAVEFORM);
     assert(pixels==diff&&lines==dirty_lines&&columns==dirty_columns);
     assert(mapped_luts&&mapped_count==3&&!memcmp(back,old,BYTES));
-    assert(mapped_starts[0]==expected_area.y&&mapped_ends[0]==expected_art.y);
+    assert(mapped_starts[0]==(expected_area.y&~31)&&mapped_ends[0]==expected_art.y);
     assert(mapped_starts[1]==expected_art.y&&mapped_ends[1]==expected_art.y+expected_art.height);
-    assert(mapped_starts[2]==mapped_ends[1]&&mapped_ends[2]==expected_area.y+expected_area.height);
+    assert(mapped_starts[2]==mapped_ends[1]&&mapped_ends[2]==((expected_area.y+expected_area.height+31)&~31));
     for(int y=0;y<H;++y)assert(lines[y]);
     for(int x=0;x<W;++x)assert(!!columns[x/2]==(x>=expected_area.y&&x<expected_area.y+expected_area.height));
     for(int y=0;y<H;y+=83){
         // 每一相均覆盖题头/中部/分页，输入必须来自同一真实前后帧。
         // Every phase covers header/art/pagination using the same real prior/target pair.
         const int points[]={0,1,159,160,161,191,192,193,991,992,993,1087,1088,1097,1101,1119};
-        for(unsigned i=0;i<sizeof(points)/sizeof(points[0]);++i){int x=points[i];if(x<0||x>=W)continue;assert(diff[y*W+x]==((nibble(front,x,y)<<4)|nibble(old,x,y)));}
+        for(unsigned i=0;i<sizeof(points)/sizeof(points[0]);++i){int x=points[i];if(x<expected_area.y||x>=expected_area.y+expected_area.height)continue;assert(diff[y*W+x]==((nibble(front,x,y)<<4)|nibble(old,x,y)));}
     }
     for(int band=0;band<3;++band){
         assert(mapped_selectors[band]==(band==1?1:0));
@@ -137,6 +148,45 @@ int main(void){
             assert(nibble(back,x,y)==nibble(committed?front:old,x,y));
         }
     }
+    // DU14和完整灰阶同时逐相输出，短表结束后全保持；逐拍失败不提交back。
+    // DU14 and complete grays run together, holding after the shorter table ends; no failed phase commits back.
+    expected_art=(EpdRect){0,352,H,672};full_cleanup=false;du_chrome=true;
+    for(int failure=0;failure<=58;++failure){
+        soft.phases=22;art.phases=58;reset();fail_at=failure;
+        assert(run()==(failure?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS));
+        assert(scans==(failure?failure:58)&&differences==1&&powerons==1&&!mapped_luts);
+        for(int y=0;y<H;++y)for(int x=0;x<W;++x){
+            bool committed=!failure&&x<expected_area.height;
+            assert(nibble(back,x,y)==nibble(committed?front:old,x,y));
+        }
+    }
+    du_chrome=false;
+    // 列表GC精确到未对齐/奇数半字节边缘，等值像素也驱动；失败不提交，且无需PSRAM分配。
+    // List GC uses exact unaligned/odd nibble edges and drives equal pixels; failures do not commit and no PSRAM allocation is needed.
+    native_area=true;
+    const EpdRect list_crops[]={{0,160,H,928},{0,190,H,898},{0,191,H,896},{0,191,H,897}};
+    for(unsigned c=0;c<sizeof(list_crops)/sizeof(list_crops[0]);++c)for(int fail=0;fail<2;++fail){
+        reset();expected_area=list_crops[c];fail_at=fail;water_test_alloc_fail=1;
+        assert(e0470_update_native_area(&hl,expected_area,&E0470_WAVEFORM)==(fail?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS));
+        assert(scans==1&&differences==1&&powerons==1&&!mapped_luts);
+        for(int y=0;y<H;++y)for(int x=0;x<W;++x){
+            bool committed=!fail&&x>=expected_area.y&&x<expected_area.y+expected_area.height;
+            assert(nibble(back,x,y)==nibble(committed?front:old,x,y));
+        }
+    }
+    native_area=false;expected_area=(EpdRect){0,0,H,1120};
+    // 灰阶列表上八白/下十白同轮，190像素的精确裁剪不触及题头，逐拍失败保持back。
+    // List strengths share one scan; exact190px crops protect the header and all failed phases preserve back.
+    expected_area=(EpdRect){0,190,H,898};expected_art=(EpdRect){0,640,H,448};full_cleanup=false;
+    for(int failure=0;failure<=60;++failure){
+        soft.phases=58;art.phases=60;reset();fail_at=failure;
+        assert(run()==(failure?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS));
+        for(int y=0;y<H;++y)for(int x=0;x<W;++x){
+            bool commit=!failure&&x>=190&&x<1088;
+            assert(nibble(back,x,y)==nibble(commit?front:old,x,y));
+        }
+    }
+    expected_area=(EpdRect){0,0,H,1120};
     soft.phases=art.phases=48;
     expected_art=(EpdRect){0,192,H,800};
     reset();water_test_alloc_fail=1;assert(run()==EPD_DRAW_NO_PHASES_AVAILABLE);
@@ -154,6 +204,6 @@ int main(void){
         assert(!scans&&!differences&&!powerons);
     }
     for(int rot=0;rot<3;++rot){reset();rotation=rot;assert(run()==EPD_DRAW_INVALID_CROP);assert(!scans);}
-    puts("simultaneous shelf:37/39/48 phases, shared chrome/art, GC48/47 padding, footer, every phase failure, OOM and geometry passed");
+    puts("simultaneous BW/gray up to58 phases and exact native-GC list crops; shelf37/39/48 phases, shared chrome/art, GC48/47 padding, footer, every phase failure, OOM and geometry passed");
     return 0;
 }

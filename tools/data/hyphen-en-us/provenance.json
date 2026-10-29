@@ -1,0 +1,10 @@
+{
+  "upstream": "hyphenation/tex-hyphen",
+  "commit": "5684c0f51c0b81133db2efbe60a408b4155a3ff5",
+  "path": "hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-en-us.tex",
+  "url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-en-us.tex",
+  "sha256": "f4ffcd96c5cbc886bdad23f95dcae8edc3cd3620eae62f7946eceda97c4e68f8",
+  "bytes": 34128,
+  "license": "Copying/distribution with or without modification permitted without royalty, retaining copyright and permission notice",
+  "usage": "Unmodified source for compact read-only trie and independent bounded Liang matcher; no upstream engine code copied."
+}

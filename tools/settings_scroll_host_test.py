@@ -40,7 +40,7 @@ def function(name):
 
 assert not any(word in source for word in ('ui_follow_', 'display_follow_', 's_scroll_cache', 'coasting', 'lighten_text'))
 assert 'scroll_gesture(' not in function('on_tick')
-start = source.index('if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {', source.index('static app_redraw_t on_gesture'))
+start = source.index('if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN', source.index('static app_redraw_t on_gesture'))
 event_block = block(source, start)
 unit = r'''
 #include <assert.h>
@@ -60,10 +60,11 @@ enum EpdDrawMode {MODE_GC16,MODE_GL16,MODE_DU};
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define SETTINGS_SCROLL_MAX 833
+#define SHELF_STYLE_CHOICES 4
 typedef int EpdWaveform;
 enum {APP_MAIN_REFRESH_NORMAL,APP_MAIN_REFRESH_FAST,APP_MAIN_REFRESH_WATER};
 static const int E0470_WAVEFORM=0,E0470_FOLLOW_WAVEFORM=1,settings_soft=2;
-static int s_page,s_main_scroll,s_ble_scroll,selected_mode,paint_mode;
+static int s_page,s_main_scroll,s_ble_scroll,s_style_scroll,selected_mode,paint_mode;
 
 static const EpdWaveform *display_settings_scroll_waveform(void){return &settings_soft;}
 static bool s_scroll_drag_consumed,s_scroll_present_pending,s_input_layout,s_input_settle;
@@ -107,7 +108,7 @@ int main(void){
   assert(feed(300,800,true,true,0)==APP_REDRAW_NONE);
   assert(feed(300,693,true,false,100)==APP_REDRAW_NONE&&s_main_scroll==0);
   assert(feed(300,692,true,false,110)==APP_REDRAW_AREA&&s_main_scroll==204);
-  assert(pushes==before+1&&paints==pushes&&paint_mode==mode&&pushed_mode==MODE_DU);
+  assert(pushes==before+1&&paints==pushes&&paint_mode==mode&&pushed_mode==MODE_GL16);
   assert(cancels==before_cancel+1);
   assert(pushed.y==160&&pushed.y+pushed.height==UI_NAV_REFRESH_END);
   for(int i=1;i<=30;++i)assert(feed(300,692-i*10,true,false,110+i*10)==APP_REDRAW_NONE&&s_main_scroll==204);
@@ -130,7 +131,7 @@ int main(void){
   // Multitouch/fault cancellation adds no motion, taps recover, and repeated swipes add no settling/periodic full refresh.
   reset(SETTINGS_MAIN,0);feed(300,800,true,true,0);touch.count=2;ctx.pressed=false;ui_gesture_event_t canceled;
   assert(ui_gesture_feed(&recognizer,&ctx,&canceled)&&canceled.type==UI_GESTURE_CANCEL);event(&ctx,&canceled);assert(!s_main_scroll);
-  for(int i=0;i<80;++i){reset(SETTINGS_MAIN,400);before=pushes;feed(300,800,true,true,0);feed(300,680,true,false,20);feed(300,680,false,false,40);assert(pushes==before+1&&pushed_mode==MODE_DU);}
+  for(int i=0;i<80;++i){reset(SETTINGS_MAIN,400);before=pushes;feed(300,800,true,true,0);feed(300,680,true,false,20);feed(300,680,false,false,40);assert(pushes==before+1&&pushed_mode==MODE_GL16);}
   for(int page=SETTINGS_BLUETOOTH;page<=SETTINGS_BLE_SCAN;++page){
    reset(page,0);feed(300,800,true,true,0);assert(feed(300,680,true,false,20)==APP_REDRAW_AREA&&s_ble_scroll==204);
    assert(pushed.y==190&&pushed.y+pushed.height==settings_content_end());feed(300,680,false,false,40);
@@ -138,12 +139,12 @@ int main(void){
   const int pages[]={SETTINGS_SHELF_STYLE,SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER,SETTINGS_AVATAR};
   for(unsigned i=0;i<sizeof(pages)/sizeof(pages[0]);++i){
    s_page=pages[i];s_scroll_present_pending=true;assert(settings_present(&ctx,APP_REDRAW_AREA));
-   assert(pushed_mode==MODE_DU&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==settings_content_end());
+   assert(pushed_mode==MODE_GL16&&pushed.y==(s_page==SETTINGS_SHELF_STYLE?242:190)&&pushed.y+pushed.height==settings_content_end());
   }
  }
  s_page=SETTINGS_UPGRADE;assert(settings_present(&ctx,APP_REDRAW_AREA)&&pushed.y==468&&pushed.height==64);
  assert(!settings_present(&ctx,APP_REDRAW_NONE));
- puts("PASS: actual generic gestures + restored settings handler/presenter: all three modes use one discrete step and one shared fast-difference update per swipe; no tracking, momentum, motion ink, extra release/idle frames or periodic full flash; root crop preserves navigation and child crop stops above persistent navigation; selectors and OTA remain");
+ puts("PASS: actual generic gestures + restored settings handler/presenter: all three modes use one discrete step and one shared fast-difference update per swipe; retained AA/avatars, one bounded list-gray pass, no extra release/idle frames or periodic full flash; root crop preserves navigation and child crop stops above persistent navigation; selectors and OTA remain");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-settings-rollback-') as directory:
@@ -151,3 +152,45 @@ with tempfile.TemporaryDirectory(prefix='kiikoread-settings-rollback-') as direc
     subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',
                     '-I'+str(root/'tools/ui_gesture_stubs'),'-I'+str(root/'main/ui'),str(path),str(root/'main/ui/ui_gesture.c'),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
+
+# Run the actual decoration helpers independently of text/avatar painting.
+if 'static bool settings_plain_list(' in source:
+    decoration = r"""
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+typedef struct {int x,y,width,height;} EpdRect;
+enum {SETTINGS_MAIN,SETTINGS_BLUETOOTH,SETTINGS_BLE_SCAN,SETTINGS_SYSTEM_FONT,SETTINGS_WALLPAPER_PREVIEW};
+#define UI_GRAY_BLACK 0
+#define UI_GRAY_WHITE 255
+static int s_page,fill_ink,edge_ink,rounds,controls,dividers,hairlines;
+static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t fill){(void)fb;(void)r;(void)radius;fill_ink=fill;}
+static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,uint8_t ink){(void)fb;(void)r;(void)radius;edge_ink=ink;++rounds;}
+static void ui_draw_control_frame(uint8_t *fb,EpdRect r,int radius,uint8_t ink){(void)fb;(void)r;(void)radius;edge_ink=ink;++controls;}
+static void ui_hairline(uint8_t *fb,int y,int x,int width,uint8_t ink){(void)fb;(void)y;(void)x;(void)width;edge_ink=ink;++hairlines;}
+static void ui_draw_separator(uint8_t *fb,int y,int x,int width,uint8_t ink){(void)fb;(void)y;(void)x;(void)width;edge_ink=ink;++dividers;}
+""" + function('settings_plain_list') + function('settings_card') + function('settings_divider') + r"""
+int main(void){
+ uint8_t untouched[4]={17,85,153,221};
+ for(int page=SETTINGS_MAIN;page<=SETTINGS_BLE_SCAN;++page){
+  s_page=page;
+  for(int fill=0;fill<256;fill+=17){
+   int before=controls;
+   settings_card(untouched,(EpdRect){36,200,612,100},20,fill,0x70);
+   assert(fill_ink==(fill<128?0:255)&&edge_ink==0&&controls==before);
+  }
+  settings_divider(untouched,400,54,575);assert(edge_ink==0);
+ }
+ assert(rounds==48&&hairlines==3&&!controls&&!dividers);
+ s_page=SETTINGS_WALLPAPER_PREVIEW;settings_card(untouched,(EpdRect){36,200,612,100},20,0xd0,0x70);
+ assert(fill_ink==0xd0&&edge_ink==0x70&&controls==1);
+ settings_divider(untouched,400,54,575);assert(edge_ink==0x60&&dividers==1);
+ assert(untouched[0]==17&&untouched[1]==85&&untouched[2]==153&&untouched[3]==221);
+ puts("PASS: actual Pico list helpers use binary card fills/edges/separators across all16 fill levels; preview styling and untouched glyph/avatar buffer retained");
+}
+"""
+    with tempfile.TemporaryDirectory(prefix='pico-settings-decoration-') as directory:
+        path=Path(directory)/'decoration.c';binary=path.with_suffix('');path.write_text(decoration)
+        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined',str(path),'-o',str(binary)],check=True)
+        subprocess.run([str(binary)],check=True)

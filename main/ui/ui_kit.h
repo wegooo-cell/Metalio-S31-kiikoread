@@ -101,6 +101,9 @@ extern "C" {
 /// 在现有画面上绘制半透明、轻度模糊的灰阶挡板。/ Draw a translucent, softly blurred grayscale guard over the existing image.
 void ui_draw_acrylic_guard(uint8_t *framebuffer, EpdRect rect);
 void ui_draw_frosted_pocket(uint8_t *framebuffer, EpdRect rect);
+/// 薄玻璃挡条及层板，仅在给定矩形内取样和绘制；不修改封面主体、不推屏。
+/// Thin glass rail and shelf edge, sampling/painting only inside rect; never alter cover bodies or present.
+void ui_draw_liquid_shelf_rail(uint8_t *framebuffer, EpdRect rect);
 
 /// 文字按「行的上沿」定位，基线由字号推出，调用处不用再算 ascender。
 /// Text is placed by the top of the line; the baseline comes from the size so callers skip the ascender.

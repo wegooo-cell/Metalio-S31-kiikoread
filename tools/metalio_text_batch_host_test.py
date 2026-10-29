@@ -55,7 +55,6 @@ static enum EpdRotation rotation;static int calls,scans,fail_at,mask_calls,first
 static unsigned phase_hits[64];static int64_t now;
 static bool expect_staged;static const uint8_t*staged_test_luts[1];static int8_t staged_test_lines[H];
 int water_test_alloc_fail=1;
-const EpdWaveform* display_reader_panel37_waveform(void){return NULL;}
 int epd_width(void){return W;}int epd_height(void){return H;}
 enum EpdRotation epd_get_rotation(void){return rotation;}
 EpdRect epd_full_screen(void){return(EpdRect){0,0,W,H};}
@@ -195,17 +194,18 @@ int main(void){
  // 原DU20完整相序加四相白，原尾部保持不丢；目标量化不改历史。/ Complete DU20 plus four whites, original tail holds and real history retained.
  const EpdWaveform*fast=display_reader_fast_text_waveform();
  const EpdWaveformPhases*du=e0470_waveform_phases(fast,MODE_GL16);
- assert(du&&du->phases==24);
+ assert(du&&du->phases==(KIIKO_S31_DU14?18:24));
+ const int fast_frames=du->phases;
  for(int from=0;from<16;++from)for(int to=0;to<16;++to){
   rotation=EPD_ROT_INVERTED_PORTRAIT;memset(front,to|(to<<4),BYTES);memset(back,from|(from<<4),BYTES);
   memcpy(saved,back,BYTES);reset();fail_at=0;
   assert(display_reader_fast_text_prepare(&hl,logical())&&!memcmp(back,saved,BYTES));
   int target=to<8?0:15;for(size_t i=0;i<BYTES;++i)assert(front[i]==(target|(target<<4)));
-  int first=0;while(first<24&&!e0470_phase_action(du,first,target,from))++first;
-  int skip=first==24?23:first?first-1:0;
+  int first=0;while(first<fast_frames&&!e0470_phase_action(du,first,target,from))++first;
+  int skip=first==fast_frames?fast_frames-1:first?first-1:0;
   assert(e0470_text_turn_with_waveform(&hl,logical(),E0470_TURN_RTL,fast)==EPD_DRAW_SUCCESS);
-  assert(calls==1&&first_seen==skip&&scans==24-skip&&!memcmp(front,back,BYTES));
-  for(int f=0;f<24;++f){assert(phase_hits[f]==(unsigned)(f>=skip));if(f<skip)assert(!e0470_phase_action(du,f,target,from));}
+  assert(calls==1&&first_seen==skip&&scans==fast_frames-skip&&!memcmp(front,back,BYTES));
+  for(int f=0;f<fast_frames;++f){assert(phase_hits[f]==(unsigned)(f>=skip));if(f<skip)assert(!e0470_phase_action(du,f,target,from));}
  }
  static uint8_t before_front[BYTES];
  for(int rot=0;rot<4;++rot){rotation=rot;
@@ -221,7 +221,7 @@ int main(void){
   for(int y=0;y<H;++y)for(int x=0;x<W;++x){size_t i=(size_t)y*W/2+x/2;int shift=(x&1)*4;
    int old=(before_front[i]>>shift)&15;bool in=x>=px&&x<px+pw&&y>=py&&y<py+ph;
    assert(((front[i]>>shift)&15)==(in?(old<8?0:15):old));}
-  for(int fail=1;fail<=24;++fail){
+  for(int fail=1;fail<=fast_frames;++fail){
    memset(front,0,BYTES);memset(back,255,BYTES);memcpy(saved,back,BYTES);reset();fail_at=fail;
    assert(e0470_text_turn_with_waveform(&hl,logical(),E0470_TURN_RTL,fast)==EPD_DRAW_EMPTY_LINE_QUEUE);
    assert(calls==1&&scans==fail&&!memcmp(back,saved,BYTES));
@@ -267,8 +267,11 @@ int main(void){
 '''
 with tempfile.TemporaryDirectory(prefix='s31-text-batch-') as folder:
  temp=Path(folder);c=temp/'test.c';c.write_text(unit);binary=temp/'test'
+ (temp/'esp_heap_caps.h').write_text((root/'tools/water_turn_stubs/esp_heap_caps.h').read_text()+'\nstatic inline void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n); }\n')
  (temp/'esp_log.h').write_text('#pragma once\n#include <stdio.h>\n#undef ESP_LOGI\n#define ESP_LOGI(tag,fmt,...) do{char msg[256];(void)(tag);(void)snprintf(msg,sizeof(msg),fmt,__VA_ARGS__);}while(0)\n')
- subprocess.run(['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-Wno-unknown-attributes','-fsanitize=address,undefined','-DKIIKO_BOARD_METALIO47=1','-DKIIKO_S31_TEXT_RIPPLE=1','-DKIIKO_S31_FAST_READER_PANELS=1','-I'+str(temp),
+ command=['cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-unused-variable','-Wno-unknown-attributes','-fsanitize=address,undefined','-DKIIKO_BOARD_METALIO47=1','-DKIIKO_S31_TEXT_RIPPLE=1','-DKIIKO_S31_FAST_READER_PANELS=1','-I'+str(temp),
  '-I'+str(root/'boards/metalio47/src/main'),'-I'+str(root/'main'),'-I'+str(root/'components/epdiy/src'),'-I'+str(root/'components/epdiy/include'),'-I'+str(root/'components/e0470_epaper_waveform/include'),'-I'+str(root/'components/e0470_epaper_waveform/metalio'),'-I'+str(root/'components/e0470_page_turn/include'),'-I'+str(root/'tools/water_turn_stubs'),'-I'+str(root/'tools/metalio_stubs'),
- str(c),str(root/'boards/metalio47/src/main/metalio_text_ripple.c'),str(root/'boards/metalio47/src/main/display_reader_waveform.c'),str(root/'boards/metalio47/src/components/e0470_page_turn/e0470_page_turn.c'),str(root/'boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c'),str(root/'components/e0470_epaper_waveform/e0470_waveform_trim.c'),'-o',str(binary)],check=True)
- subprocess.run([str(binary)],check=True,timeout=90)
+ str(c),str(root/'boards/metalio47/src/main/metalio_text_ripple.c'),str(root/'boards/metalio47/src/main/display_reader_waveform.c'),str(root/'boards/metalio47/src/main/display_main_waveform.c'),str(root/'boards/metalio47/src/components/e0470_page_turn/e0470_page_turn.c'),str(root/'boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c'),str(root/'components/e0470_epaper_waveform/e0470_waveform_trim.c'),'-o',str(binary)]
+ for du14 in (0,1):
+  subprocess.run(command[:1]+[f'-DKIIKO_S31_DU14={du14}']+command[1:],check=True)
+  subprocess.run([str(binary)],check=True,timeout=90)

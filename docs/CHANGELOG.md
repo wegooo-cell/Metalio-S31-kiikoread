@@ -1,9 +1,59 @@
 # 版本变更 / Changelog
 
+## Metalio S31 0.3.3-rc107 / S31 refresh and reading update
+
+- S31普通阅读沿用Moku的16灰GL37加六相白（43相），正文、图文与离开图片统一维护整页白底，等黑/等灰保持；水波纹保留原22相迁移并加六相白（28相），速读使用厂家DU14加四相白（18相）。均保留原页数全刷设置及原厂GC48恢复。
+  S31 ordinary reading retains Moku's16-gray GL37 plus six white phases(43), maintaining the whole white background for text/images/image exits while holding equal black/grays. Ripple retains22 transition phases plus six white phases(28); Fast BW uses vendorDU14 plus four whites(18). Retain user cleanup intervals and nativeGC48 recovery.
+- 主页快刷/水波纹切换将六/八相补白覆盖到未变化留白，涉及书架八相、其余六相；合并黑白、灰阶与横条输出，保留底栏图标。周期清理使用真实原厂GC48，成功后仅抵扣实际清理范围。
+  Fast/ripple root switches extend the same six/eight white phases to unchanged blanks(eight involving the shelf,six otherwise), combining BW/grays/marker while protecting navigation icons. Periodic cleanup uses actual nativeGC48 and clears only successfully covered accounting.
+- 设置/蓝牙列表保留文字与头像灰阶，上部八相、下部十相背景维护在同轮输出（58/60相）；每八次实际变化的滚动以原厂GC48区域清理替换当次输出，不在松手或空闲时追加刷新。
+  Settings/BLE lists retain glyph/avatar grays with upper-eight/lower-ten white drives in one58/60-phase output. Every eighth changed scroll replaces that output with exact-crop nativeGC48; release/idle adds no scan.
+- 收录液态玻璃书架、英文单词/TeX断词及词间对齐、TXT分卷目录与快速选卷。未设置时默认液态玻璃书架、Moon Clock与主页强刷；保留已有配置和阅读进度。
+  Include the liquid-glass shelf, English word/TeX hyphenation and spacing, TXT volume-aware TOC and quick volume selection. Unconfigured devices default to the liquid-glass shelf,Moon Clock and full Home refresh; existing preferences and reading positions remain.
+- 本次只发布Metalio S31，Pico正式固件及下载保持rc102。支持保留数据更新，并保留rc106原包回退；刷新观感依面板状态而异。
+  Publish Metalio S31 only; Pico remains rc102. Support data-preserving updates and retain originalrc106 rollback packages; optical results depend on panel condition.
+
+
 ## 未发布 / Unreleased
 
-- S31普通/图文阅读沿用Moku的GL37加六相白，进度同轮输出；速读保留独立黑白DU，并在原定稿前追加四相白。GL37不可用时保持灰阶回退、等黑/灰保护与末尾定稿，手动/周期GC48不变。
-  S31 ordinary/image turns retain Moku GL37 plus six whites and fused progress; FastBW independently retains DU with four added whites before its original settling. Preserve gray fallback/equal black-gray holds/settling without GL37 and retain manual/periodic GC48.
+- S31本地残影优化：主页面切换涉及书架补八相变白，其余补六相，保留原灰阶、固定底栏和两相释放；设置/蓝牙列表使用黑白装饰、灰阶字缘/头像，列表滚动采用本机完整48相加八相擦白及两相释放，一次区域输出，不在松手后补刷。列表优先清残影、反馈会比原黑白快刷慢，光学效果待实屏确认；阅读模式保持独立。
+  S31 local ghosting work: root changes add eight changed-white phases involving the shelf or six otherwise, retaining native grays, navigation and two release holds. Settings/BLE lists use BW decoration and gray glyphs/avatars; scrolling uses native48 plus eight whites/two releases in one regional pass without release-time output. Lists favor cleanup over prior BW latency; optical acceptance remains pending and reading modes stay independent.
+
+- Pico本地实验：阅读水波纹保留本板灰阶序列与8条带方向，定稿前增加四相变白（41相），正文/进度同轮完成；主页面切换等灰保持、变白加四相，普通/水波纹合并底部指示条，保留固定底栏及失败恢复。设置/蓝牙列表改黑白框线、分隔线和图标墨色，文字/头像灰阶保留；滚动恢复完整擦白并加八相（45相），仅刷新列表，不在松手后追加全屏清理。
+  Pico local experiment: native eight-band reader ripple adds four changed-white phases before settling (41) and fuses progress. Root changes hold equal grays, add four changed-white phases and fuse the marker for ordinary/ripple while preserving navigation and failure recovery. Settings/BLE lists use BW decoration with glyph/avatar grays retained; scrolling restores native whitening plus eight phases (45) within the list, without a release-time full-screen pass.
+
+- 两机同步图片设置弹窗：Pico文件管理打开图片后，点按中间可设为壁纸/透明书封或取消，左右滑动切图，底部显示提示；共用玻璃弹窗绘制，JPEG不允许设透明书封，取消不改设置。Pico沿用本板完整灰阶表，一轮输出切图/弹窗，不先擦白再重放；设置中的独立选择页保持原流程。
+  Shared image actions: Pico Files previews now offer wallpaper/transparent-cover/cancel on a center tap, sibling swipes and a visible hint. Reuse the glass menu; reject JPEG transparent covers and preserve settings on cancel. Pico uses its native full gray table in one image/menu output; existing dedicated settings pickers remain.
+
+- Pico本地版对齐已合PR54：普通及图文页共用本板柔和灰阶差分，保留厂商原序、等灰保持，在定稿前仅为变白像素追加四相，并合并页脚输出；手动及周期全刷保持完整GC16。同步现有液态玻璃书架、英文TeX断词对齐、TXT懒目录/分卷选择及无配置默认外观；Pico根页采用本板独立擦白档，不引入S31波形或睡眠参数。
+  Pico local parity with merged PR54: board-native soft gray differences for ordinary/image turns, unchanged-pixel holds and four changed-white phases before settling, with fused footer output and full native GC16 cleanup. Retain shared glass shelf, TeX English layout, lazy TXT volume navigation and unconfigured appearance defaults; keep Pico-native root whitening and hardware isolation.
+
+- S31普通/图文原样采用Moku GL37加六相白（43相）；速读保留本机DU并增加四相白（DU14实验18相、原厂DU20为24相），恢复模式分流与失败保护。GL37不可用时保留完整灰阶回退和等黑灰保护，手动/周期GC48不变。
+  S31 ordinary/image turns retain Moku GL37 plus six whites (43); FastBW retains board DU plus four whites (DU14 experiment18/nativeDU20 24),mode isolation and failure history. Preserve gray fallback/equal black-gray protection without GL37 and retain manual/periodic GC48.
+
+- 两机同步：分卷目录底部新增“选择卷”，只显示一级卷名并分页；选卷后展开定位，取消返回原章节目录页，选卷不加载正文、额外分配内存或改变阅读进度。未分卷书保留原布局。
+  Both boards: add a paged volume-only picker to grouped TXT directories. Selection expands and locates a volume; cancel restores the previous chapter page without body loading, extra allocation or progress changes. Flat books keep their layout.
+
+- 两机同步：TXT目录支持“卷→章”展开/折叠，优先明确卷名，缺少卷名时结合章号重置及后续2/3章保守分组；卷末总结/感言归原卷。进入目录定位当前卷/章，重复章号不排序或去重。卷表最多256组/2KiB，标题仍按需读，资源不足退回平铺；只重建索引缓存，旧阅读进度、书签和原文件位置保留。
+  Both boards: add an accordion TXT volume/chapter directory, preferring explicit volume names and conservatively confirming restarted chapter sequences. Keep end notes with their volume, locate the current chapter on entry and retain duplicate ordinals in source order. Bound groups to256/2KiB with lazy titles and flat fallback; rebuild only index caches while preserving source/progress/bookmark positions.
+
+- S31十四相本地实验：首页快刷真实切页和阅读速读黑白在原末三相维护白底，未变黑/灰保持；内容区一次覆盖输出，不加相数、反黑或第二轮补刷，普通/水波纹与清理全刷保留。
+
+- S31本地实验：新增默认关闭的厂家DU14编译开关，仅替换速读黑白与纯黑白界面访问器；保持原扫描、灰阶底栏合成、普通阅读、封面和清理全刷，实验标志写入本地包清单。
+
+- 两机同步：TXT目录补充英文Part/罗马数字、Markdown一级至三级标题、序章/附录/册及廿卅数字，校验标题边界，正文另有章节时去除卷首目录清单；索引版本更新但旧阅读分段、进度和书签编号保留，仍按页分配目录与按需读取标题。
+
+- 两机同步：英文正文改用有界Liang/TeX英语断词表，按词间空格伸缩代价选择整词或合法连字符断点；只调整空格，不拉散字母，段末保持自然宽度，保留原文进度/书签偏移与竖排。断词表只读存Flash、不读卡、不为匹配分配堆。
+
+- 两机同步：新增「液态玻璃书架」，三列九本、薄玻璃挡条、细层板与不透明封面；沿用现有菜单玻璃算法和有界合成缓存，普通/水波纹保留灰阶、快刷使用稳定点阵，同次输出不加补刷。样式独立保存为6，原样式、旧3/4兼容和备份保留，选择页支持滚动与定宽文字。
+  Both boards: add a nine-book liquid-glass shelf with thin refractive rails, ledges and opaque covers. Reuse bounded glass composition/cache with grays in normal/ripple and stable fast-mode dots in the same output. Persist style6 without replacing existing styles or retired-ID compatibility; retain backup support and add bounded picker scrolling/labels.
+
+- 两机同步：TXT/EPUB横排英文优先整词换行，兼容词内撇号、重音字母和普通连字符；正文词间空格适度对齐，段末保持自然宽度；整词换行留下过大空白时有界拆词并加显示用连字符，超长词及极窄行保留安全拆分。原文、进度及书签偏移不变；重新排版后的页数可能变化，竖排和中文禁则保持原规则。
+  Both boards: prefer whole English words in horizontal TXT/EPUB layout, including internal apostrophes, accented Latin and existing hyphens. Justify moderate body-line slack between words while keeping paragraph endings natural; excessive whole-word slack uses bounded display-only hyphens, retaining the safe overlong-token and narrow-row fallback. Source/progress/bookmark offsets stay unchanged, reflow may change page counts, and vertical/CJK rules remain.
+
+- 两机同步：TXT新增独立可见目录，兼容长章名、空格、中文/英文编号、统一分隔线和保守数字标题；按页分配定位表、按需读取标题，保留旧阅读分段和进度/书签编号。目录最多16384项、128KiB，候选过多或分配失败时保留原分段阅读；索引缓存增加结构与校验和验证。
+  Both boards: add demand-paged TXT navigation with long/indented/numbered/separator headings, lazy titles and exact in-segment targets. Retain legacy segment/progress/bookmark IDs; cap navigation at16384/128KiB, fall back without unbounded growth, and validate cache structure/checksums.
+
 - 两机同步：改进书名、作者与已知来源后缀识别，清理重复作者、译者和冗余宣传尾注；保留原文件及操作完整路径，阅读进度不变。
   Both boards: refine title/author and known source suffix recognition without renaming files or changing reading progress; file actions retain complete paths.
 - Pico构建对齐现有rc101的字体路径保护、黑白设置开关、白底密码框、可选密码宽限期和标题提示排版；宿主夹具按机型选择，S31电源与显示后端保持独立。
@@ -15,6 +65,13 @@
 - S31恢复睡眠按键扫描时增加双采样，避免方向切换后单次低电平或I²C读错被当作解锁短按；真实按键、双击和密码验证保留。
 - S31锁屏恢复启动时保留持久化锁定标记，避免门禁前再次复位丢失锁定状态；真实解锁后清理，自动开书仍先消费恢复入口。
 - 两机启动日志补充恢复保护的具体原因位，区分异常复位、未完成启动/开书和NVS失败；不放宽保护或修改记录格式。
+
+## Pico 0.3.3-rc102 · 2026-10-29
+
+- 主页面切换补白：来源或目标是书架时八相，其余根页六相；实际Pico事件循环限定一次输出作用域，保留原底栏和整刷优先级。
+- 设置列表补八相至45相，框线/分隔线黑白，文字与头像保留灰阶；阅读水波纹41相并合并进度，普通翻页保留已合PR54方案。
+- 发布液态玻璃书架、无配置外观默认、英文TeX断词及空格对齐、TXT懒目录/卷章/快速选卷、文件看图设置壁纸等现有本地改进；保留有效设置、进度和书签。
+- 官网刷机、GitHub Release、TF/USB与双域OTA同步，保留原rc101回退；S31正式交付未改。本次产品构建开启Pico独立main-clean参数，不使用S31底层。
 
 ## Metalio S31 0.3.3-rc106 · 2026-10-27
 

@@ -82,6 +82,7 @@ static uint8_t loaded_keys[3];
 static bool has_keys[3];
 static int loaded_shelf=-1, loaded_lock=-1,loaded_home=-1;
 static bool loaded_shelf_v22;
+static int loaded_home_full=-1;
 esp_err_t read_pico_sd_get_info(read_pico_sd_info_t *info) { info->mounted = card_mounted; return ESP_OK; }
 esp_err_t nvs_flash_init(void) { return ESP_OK; }
 esp_err_t nvs_flash_erase(void) { return ESP_OK; }
@@ -108,11 +109,13 @@ esp_err_t nvs_set_u32(nvs_handle_t h, const char *key, uint32_t value) {
     return ESP_OK;
 }
 esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) {
+    if(!strcmp(key,NVS_KEY_HOME_FULL)&&loaded_home_full>=0){*value=(uint8_t)loaded_home_full;return ESP_OK;}
 #ifdef NVS_KEY_PIN_GRACE
     if (has_grace && !strcmp(key,NVS_KEY_PIN_GRACE)) { *value=loaded_grace; return ESP_OK; }
 #endif
  (void)h; if(test_full_storage&&!strcmp(key,NVS_KEY_READER_FULL)){*value=loaded_full_pages;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_TURN)&&loaded_turn>=0){*value=(uint8_t)loaded_turn;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
 esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) {
+    if(!strcmp(key,NVS_KEY_HOME_FULL))loaded_home_full=value;
 #ifdef NVS_KEY_PIN_GRACE
     if (!strcmp(key,NVS_KEY_PIN_GRACE)) { loaded_grace=value; has_grace=true; }
 #endif
@@ -134,6 +137,22 @@ esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; r
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
 int main(void) {
+    // 无配置采用新默认；有效旧选择在没有迁移标记时也不被覆盖。
+    // New defaults apply only when unconfigured; keep valid choices even without the legacy marker.
+    app_settings_init();
+    assert(app_settings_shelf_style()==6&&app_settings_home_component()==APP_HOME_MOON&&app_settings_home_full_refresh());
+    const int valid_styles[]={1,2,5,6};
+    const app_home_component_t widgets[]={APP_HOME_FOLDER,APP_HOME_CLOCK,APP_HOME_MOON};
+    for(unsigned i=0;i<4;++i)for(unsigned j=0;j<3;++j)for(int full=0;full<2;++full){
+        loaded_shelf=valid_styles[i];loaded_shelf_v22=false;loaded_home=widgets[j];loaded_home_full=full;
+        app_settings_init();
+        assert(app_settings_shelf_style()==valid_styles[i]&&loaded_shelf==valid_styles[i]);
+        assert(app_settings_home_component()==widgets[j]&&app_settings_home_full_refresh()==(bool)full);
+    }
+    loaded_shelf=-1;loaded_shelf_v22=false;loaded_home=255;loaded_home_full=255;
+    app_settings_init();assert(app_settings_shelf_style()==6&&app_settings_home_component()==APP_HOME_MOON&&app_settings_home_full_refresh());
+    loaded_home=-1;loaded_home_full=-1;keys_v2=false;
+
 #ifdef NVS_KEY_PIN_GRACE
     app_settings_init();
     assert(!app_settings_pin_grace_code() && !app_settings_pin_locked_at());
@@ -683,7 +702,7 @@ int main(void) {
 
     // 已删除的3/4样式在旧NVS与旧备份都回退到亚克力，1/2保持原选择。
     // Retired styles 3/4 fall back from old NVS and backups; preserve retained choices 1/2.
-    for (int style=1;style<=5;++style) {
+    for (int style=1;style<=6;++style) {
         loaded_shelf=style;loaded_shelf_v22=true;s_shelf_style=1;
         app_settings_init();assert(app_settings_shelf_style()==((style==3||style==4)?2:style));
         assert(loaded_shelf==((style==3||style==4)?2:style));
@@ -692,6 +711,9 @@ int main(void) {
         s_shelf_style=1;assert(app_settings_backup_restore()==ESP_OK);
         assert(app_settings_shelf_style()==((style==3||style==4)?2:style));
     }
+    app_settings_set_shelf_style(1);app_settings_set_shelf_style(6);
+    assert(app_settings_shelf_style()==6&&loaded_shelf==6);
+    app_settings_set_shelf_style(7);assert(app_settings_shelf_style()==6&&loaded_shelf==6);
     for (unsigned style=0;style<3;++style) {
         app_settings_set_lock_style((uint8_t)style);
         s_lock_style=99;app_settings_init();assert(app_settings_lock_style()==style);

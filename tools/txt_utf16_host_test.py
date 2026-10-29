@@ -33,7 +33,7 @@ void *heap_caps_malloc(size_t bytes,int caps){
 // Redirect the cache shell into the fixture directory; production code handles TXT payloads/version requests.
 bool book_index_cache_prepare(const char *source,const char *tag,uint32_t version,
  char *path,size_t cap,book_index_cache_header_t *key){
- if(disable_cache)return false;assert(!strcmp(tag,"txt")&&version==2);
+ if(disable_cache)return false;assert(!strcmp(tag,"txt")&&version==5);
  struct stat st;assert(!stat(source,&st));
  *key=(book_index_cache_header_t){.magic=123,.version=version,.source_size=(uint32_t)st.st_size,.modified=st.st_mtime,.path_hash=456};
  return snprintf(path,cap,"%s.idx",source)>0;
@@ -51,7 +51,7 @@ FILE *book_index_cache_open_write(const char *path,const book_index_cache_header
 bool book_index_cache_finish_write(FILE *f,const char *temp,const char *path,bool ok){
  assert(!fclose(f));if(ok){assert(!rename(temp,path));return true;}remove(temp);return false;
 }
-static void close_book(book_txt_t *b){if(b->file)fclose(b->file);free(b->entries);memset(b,0,sizeof(*b));}
+static void close_book(book_txt_t *b){book_txt_close(b);}
 static unsigned char *bytes(const char *path,size_t *size){
  FILE *f=fopen(path,"rb");assert(f&&!fseek(f,0,SEEK_END));long n=ftell(f);assert(n>=0&&!fseek(f,0,SEEK_SET));
  unsigned char *out=malloc((size_t)n+1);assert(out&&fread(out,1,(size_t)n,f)==(size_t)n);assert(!fclose(f));out[n]=0;*size=(size_t)n;return out;

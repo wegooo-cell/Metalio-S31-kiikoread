@@ -11,7 +11,8 @@
  * 用户修订：图文混排原样采用 PR9 的 book_layout；调用侧只适配图片缓存与上下文生命周期。
  * 晃动默认关；横向左晃上一页、右晃下一页，触摸与回弹不触发；离页恢复加速度配置并休眠。render只绘图。
  * 预渲染与同步推屏重叠、按行可停；推屏返回前交还字体与章节资源。
- * 普通翻页只刷新正文与页脚；手动或周期清残影整屏全刷。
+ * 用户2026-10-29对齐已合PR54：普通/图文一次整屏真实差分，等灰保持，只为变白像素补四相；手动/周期清理仍原完整GC16。
+ * User parity 2026-10-29: PR54 ordinary/image turns use one panel-wide true difference, equal-gray holds and four changed-white phases; retain complete native GC16 cleanup.
  * 用户修订：阅读手动与周期全刷恢复 rc90 的原表 GC16 目标页输出，不先擦白再补文字。
  * User revision: restore rc90's original-table GC16 target-page output for manual and periodic refresh, without a white pre-clear and text pass.
  * 用户2026-10-21修订：Pico进入阅读页单次完整GC16清理；普通文字翻页保留校准GL16前导擦除及等灰保持，沿用预读与单轮合并进度。
@@ -22,7 +23,7 @@
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
- * 用户最新修订：书架只保留深色书轨与亚克力，每页九本；收录导入及读过的书，移出仅隐藏，再读重新上架。
+ * 用户最新修订：书架保留深色书轨、亚克力及新增液态玻璃，每页九本；收录导入及读过的书，移出仅隐藏，再读重新上架。
  * 底栏保留首页/书架/文件/设置，设置直接进入设置页。
  * 用户修订：长按图书可用本机拼音输入编辑书名；阅读时长与翻页真实记录，供票根锁屏使用。
  * 用户最新修订：书名编辑可点选插入位置并用左右键微调，支持在文字中间插入和删除。
@@ -89,7 +90,7 @@
  * User revision: single-book actions use a shelf dialog; full management is for batches. Paging/sorting preserve selection; filtering/applied search and rescanning clear it.
  * Invalidate failed progress only for changed paths; retain deletion cleanup retries across page exits for this boot.
  * Lost media saves progress and closes reader resources before global font fallback; never auto-resume an invalid mount.
- * Latest user revision: the two retained shelf styles hold nine imported or read books; retired styles restore as acrylic, and removal hides until reread.
+ * Latest user revision: the retained grid styles including liquid glass hold nine imported or read books; retired styles restore as acrylic, and removal hides until reread.
  * The fourth tab opens Settings directly.
  * User revision: book details lead to an on-device Pinyin title editor; measured reading time and turns feed the ticket lock face.
  * Latest user revision: the title editor can place and move an insertion caret for edits in the middle of text.
@@ -633,7 +634,7 @@ static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style
 #define SHELF_FAST_COVER_BYTES (SHELF_FAST_COVER_STRIDE * SHELF_FAST_COVER_HEIGHT)
 #define SHELF_FAST_CACHE_RESERVE (512u * 1024u)
 #define SHELF_GUARD_CACHE_BYTES (644u * 90u / 2u)
-typedef struct { EpdRect rect; int rotation, contrast; bool binary, valid; } shelf_guard_key_t;
+typedef struct { EpdRect rect; int rotation, contrast; uint8_t style; bool binary, valid; } shelf_guard_key_t;
 static uint8_t *s_guard_cache;
 static shelf_guard_key_t s_guard_keys[3];
 static bool s_guard_cache_attempted;
@@ -644,6 +645,7 @@ static void release_guard_cache(void) {
 // 缓存精确的输入和成品；逐行比对底图，任何封面、位置或模式变化均重绘。
 // Cache exact inputs and finished pixels; compare every input row so art, position and mode changes redraw.
 static void draw_shelf_guard(uint8_t *fb,EpdRect rect,int slot) {
+    const uint8_t style=app_settings_shelf_style();
     const bool binary=s_view==SHELF&&app_settings_main_fast_refresh();
     EpdRect p=ui_rotate_rect_to_fb(rect);
     const bool fits=slot>=0&&slot<3&&!(p.x&1)&&!(p.width&1)&&p.x>=0&&p.y>=0&&
@@ -655,20 +657,21 @@ static void draw_shelf_guard(uint8_t *fb,EpdRect rect,int slot) {
         if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>=bytes+2u*1024u*1024u)
             s_guard_cache=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     }
-    if(!fits||!s_guard_cache){ui_draw_acrylic_guard(fb,rect);if(binary)ui_acrylic_bw_rect(fb,rect);return;}
+    if(!fits||!s_guard_cache){if(style==6)ui_draw_liquid_shelf_rail(fb,rect);else ui_draw_acrylic_guard(fb,rect);if(binary)ui_acrylic_bw_rect(fb,rect);return;}
     shelf_guard_key_t *key=&s_guard_keys[slot];
     size_t stride=(size_t)epd_width()/2,span=(size_t)p.width/2;
     uint8_t *input=s_guard_cache+2u*slot*SHELF_GUARD_CACHE_BYTES,*output=input+SHELF_GUARD_CACHE_BYTES;
     bool same=key->valid&&key->rotation==epd_get_rotation()&&key->contrast==app_settings_system_contrast()&&
-        key->binary==binary&&!memcmp(&key->rect,&rect,sizeof(rect));
+        key->style==style&&key->binary==binary&&!memcmp(&key->rect,&rect,sizeof(rect));
     for(int y=0;same&&y<p.height;++y)
         same=!memcmp(fb+(size_t)(p.y+y)*stride+p.x/2,input+(size_t)y*span,span);
     if(!same) {
         key->valid=false;
         for(int y=0;y<p.height;++y)memcpy(input+(size_t)y*span,fb+(size_t)(p.y+y)*stride+p.x/2,span);
-        ui_draw_acrylic_guard(fb,rect);if(binary)ui_acrylic_bw_rect(fb,rect);
+        if(style==6)ui_draw_liquid_shelf_rail(fb,rect);else ui_draw_acrylic_guard(fb,rect);
+        if(binary)ui_acrylic_bw_rect(fb,rect);
         for(int y=0;y<p.height;++y)memcpy(output+(size_t)y*span,fb+(size_t)(p.y+y)*stride+p.x/2,span);
-        *key=(shelf_guard_key_t){.rect=rect,.rotation=epd_get_rotation(),.contrast=app_settings_system_contrast(),.binary=binary,.valid=true};
+        *key=(shelf_guard_key_t){.rect=rect,.rotation=epd_get_rotation(),.contrast=app_settings_system_contrast(),.style=style,.binary=binary,.valid=true};
     } else for(int y=0;y<p.height;++y)memcpy(fb+(size_t)(p.y+y)*stride+p.x/2,output+(size_t)y*span,span);
 }
 static EpdRect row_rect(int row) {
@@ -974,6 +977,14 @@ static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* nam
     EpdRect image = shelf_cover_image(row);
     image.y += card.y - row_rect(row).y;
     const bool artwork = shelf_cover_frame_ready();
+    if (s_view == SHELF && app_settings_shelf_style() == 6) {
+        // 阴影在不透明封面外；合成只影响下方挡条，不让封面主体透底。
+        // Shadows sit outside opaque covers; only the bottom rail samples through the artwork.
+        for (int step=0;step<3;++step) {
+            uint8_t gray=(uint8_t)(0xd0+step*0x10);
+            ui_fill_rect_fast((EpdRect){image.x+image.width+step*2,image.y+4+step,2,image.height-2},gray,fb);
+        }
+    }
     ui_fill_rect_fast(image, UI_GRAY_LIGHT, fb);
     if (artwork && app_settings_main_fast_refresh() && s_view==SHELF && fast_cover_matches(row,image)) {
         ui_blit_mono_bitmap(fb,image,s_covers[row].fast_bits,SHELF_FAST_COVER_STRIDE);
@@ -1012,6 +1023,12 @@ static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* nam
                    title, EPD_DRAW_ALIGN_CENTER, false);
     }
     ui_draw_round_rect(fb, image, 0, UI_GRAY_BLACK);
+    if (s_view == SHELF && app_settings_shelf_style() == 6) {
+        epd_draw_line(image.x+4,image.y+1,image.x+4,image.y+image.height-2,0xa0,fb);
+        epd_draw_line(image.x+5,image.y+1,image.x+5,image.y+image.height-2,0xe0,fb);
+        if(app_settings_main_fast_refresh())
+            ui_acrylic_bw_rect(fb,(EpdRect){image.x,image.y,image.width+6,image.height+4});
+    }
     if (favorite && image.width >= 28 && image.height >= 42) {
         draw_shelf_favorite_icon(fb, image.x + 10, image.y + 8, 24, 31,
                                  artwork && ((app_settings_main_fast_refresh() && s_view == SHELF && fast_cover_matches(row, image))
@@ -1087,7 +1104,8 @@ static void draw_shelf_furniture(uint8_t* fb) {
         } else if (style == 2) {
             EpdRect acrylic = {20, top + 136, 644, 90};
             draw_shelf_guard(fb, acrylic, row);
-
+        } else if (style == 6) {
+            draw_shelf_guard(fb, (EpdRect){20, top + 188, 644, 42}, row);
         }
     }
 }
@@ -1213,11 +1231,14 @@ static void reader_footer_strip_number(char *dst, size_t cap, const char *source
     if (!*name || !strcmp(name, "本章") || !strcmp(name, "章节")) name = "";
     copy_text(dst, cap, name);
 }
+static size_t reader_page_offset(size_t page);
 static void reader_footer_chapter_name(char *dst, size_t cap) {
     char source[128] = {0};
-    bool selected = s_selected_toc < book_navigation_count() &&
-        book_navigation_chapter(s_selected_toc) == s_chapter &&
-        book_navigation_title(s_selected_toc, source, sizeof(source)) == ESP_OK && source[0];
+    size_t toc=s_selected_toc;
+    if(book_kind()==BOOK_KIND_TXT){size_t current=book_navigation_position(s_chapter,reader_page_offset(s_page));if(current!=SIZE_MAX)toc=current;}
+    bool selected = toc < book_navigation_count() &&
+        book_navigation_chapter(toc) == s_chapter &&
+        book_navigation_title(toc, source, sizeof(source)) == ESP_OK && source[0];
     if (!selected) {
         if (s_chapter_heading_title[0]) copy_text(source, sizeof(source), s_chapter_heading_title);
         else if (book_chapter_title(s_chapter, source, sizeof(source)) != ESP_OK) source[0] = 0;
@@ -3572,6 +3593,7 @@ static void reader_prefetch_idle(app_ctx_t *ctx) {
     }
 }
 static size_t current_toc_position(void) {
+    if(book_kind()==BOOK_KIND_TXT){size_t current=book_navigation_position(s_chapter,reader_page_offset(s_page));if(current!=SIZE_MAX)return current;}
     size_t count = book_navigation_count();
     if (s_selected_toc < count && book_navigation_chapter(s_selected_toc) == s_chapter)
         return s_selected_toc;
@@ -3700,7 +3722,7 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         if (redraw==APP_REDRAW_AREA && reader_status_visible()) {
             // 时钟单独短刷，不准备插图、不预排正文，也不累计正文全刷次数。
             // Update status alone, without image preparation, pagination, or reader cleanup counters.
-            enum EpdDrawError err=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,reader_status_area());
+            enum EpdDrawError err=update_display_area_diff_with(ctx->hl,display_main_gray_waveform(),MODE_GL16,reader_status_area());
             if (err==EPD_DRAW_SUCCESS) s_reader_clock_minute=s_reader_clock_painted_minute;
             guard_draw_result(ctx->hl,err);
             return true;
@@ -3753,21 +3775,23 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
                                          (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     else
     if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
-        // 灰阶只驱动正文，避免每张插图都把整屏先清白再闪回。
-        // Drive the grayscale body from the current frame instead of clearing the whole screen to white.
-        err = app_settings_reader_turn_effect() == 1
-            ? update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, reader_area())
-            : update_display_area_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16, reader_area());
-        if (err == EPD_DRAW_SUCCESS && s_reader_footer_pending)
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16, progress_rect());
-        if (err == EPD_DRAW_SUCCESS && s_reader_fullscreen)
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
-                                                reader_fullscreen_progress_area());
+        // 图文页也走真实差分：只驱动变化的像素，未变黑区保持；整屏白底末尾统一补擦白。
+        // Text-plus-image pages use true differences too: only changed pixels drive, unchanged
+        // black holds, and every white target on the whole panel gets the trailing erase.
+        err = update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), MODE_GL16,
+                                            (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
+        // 整屏差分已含页脚与全屏进度，不再追加第二次局部输出。
+        // The whole-panel difference already covers the footer and full-screen progress.
     }
-    else if (image_gray_refresh) err = app_settings_reader_turn_effect() == 1 &&
-        redraw != APP_REDRAW_FULL && !s_reader_cleanup
-        ? update_display_mode_diff(ctx->hl, MODE_GL16)
-        : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
+    else if (image_gray_refresh) {
+        // 图片页整页重绘同样只推变化像素；KEY2 等显式全刷仍走完整 GC16。
+        // Whole-page image repaints also drive changed pixels only; explicit full refreshes still run
+        // the complete GC16.
+        err = redraw != APP_REDRAW_FULL && !s_reader_cleanup
+            ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), MODE_GL16,
+                                            (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
+            : update_display_with(ctx->hl, &E0470_FULL_WAVEFORM, MODE_GC16);
+    }
     else if (s_reader_cleanup && redraw != APP_REDRAW_FULL)
         // 周期清理使用完整原厂灰阶定稿，保留饱和驱动；一次输出，不叠加擦白或文字补刷。
         // Periodic cleanup retains the complete vendor settling/saturation phases in one output, without erase or text replay.
@@ -3788,15 +3812,18 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
         // 翻页动画与页脚刷新独立：全屏没有页脚，仍使用用户选择的水波纹。
         // The turn effect is independent of the footer: full-screen turns still use the selected water effect.
         EpdRect turn_area=s_area;
-        // 普通文字保留校准GL16完整擦除，正文与进度共用一次输出；图片、水波纹和清屏保留独立规则。
-        // Retain calibrated GL16 erasure for ordinary text and present body/progress once; images, ripple and cleanup retain their own paths.
-        const bool fused_footer=s_reader_turn_pending&&!s_water_turn_pending&&s_mode==MODE_GL16;
+        // 普通差分及阅读水波纹均合并页脚；水波纹末带后不追加进度补刷。
+        // 普通翻页只用真实差分：正文、页脚和图片页共用柔和等灰表，未变化像素不驱动。
+        // Ordinary turns use true differences only: body, footer and image pages share the soft
+        // equal-hold table, and unchanged pixels are not driven.
+        const bool fused_footer=s_water_turn_pending ||
+            (s_reader_turn_pending&&s_mode==MODE_GL16);
         if(fused_footer) {
             EpdRect footer=s_reader_fullscreen?reader_fullscreen_progress_area():progress_rect();
             turn_area=ui_rect_union(turn_area,footer);
         }
         err = s_water_turn_pending
-            ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
+            ? update_display_water_turn(ctx->hl, turn_area, s_water_turn_dir)
             : s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
               s_view == READING && s_presented_view == (int)READING &&
               s_reader_panel == READER_PANEL_NONE && !s_toolbar && !s_clear_confirm &&
@@ -3807,14 +3834,25 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
             // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
-                ? update_display_area_diff_with(ctx->hl,
-                    s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
-                : update_display_area_with(ctx->hl, &E0470_WAVEFORM, s_mode, s_area);
+                // 普通翻页用柔和差分：厂商 GL16 原序、中灰对角线保持，末尾四相同相整理对比度——
+                // 整屏目标白的像素擦白、目标黑的像素压黑，白底干净且黑字不发灰。
+                // Ordinary turns use soft differences: vendor GL16 order with equal midgrays
+                // held, then four contrast phases that whiten every white target and darken
+                // every black target across the panel, keeping blanks clean and text inky.
+                ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(),
+                    s_mode, s_reader_turn_pending
+                        ? (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT} : turn_area)
+                // 其余局部正文刷新（图片页之后、换章首帧、灰阶回落）也只驱动变化像素。
+                // Other local body updates (after an image page, the first frame of a new chapter,
+                // gray fallbacks) also drive changed pixels only.
+                : update_display_area_diff_with(ctx->hl,
+                    s_mode == MODE_DU ? &E0470_FOLLOW_WAVEFORM : display_reader_soft_turn_waveform(),
+                    s_mode, s_area);
         if (s_water_turn_pending) e0470_page_turn_set_tick_us(prior_tick);
         if (s_reader_fullscreen && !fused_footer && err == EPD_DRAW_SUCCESS) {
             // 百分比不变时差分直接跳过；变化时只驱动最底部的少量像素。
             // Skip unchanged percentages; otherwise update only the small bottom strip.
-            err = update_display_area_diff_with(ctx->hl, &E0470_WAVEFORM, MODE_GL16,
+            err = update_display_area_diff_with(ctx->hl, display_main_gray_waveform(), MODE_GL16,
                                                 reader_fullscreen_progress_area());
         }
         if (s_reader_footer_pending && !fused_footer) {
@@ -5025,7 +5063,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     else if (dir > 0 && s_chapter + 1 < book_chapter_count()) { save_progress(); changed = load_chapter(ctx, s_chapter + 1, 0, false); }
     else if (dir < 0 && s_chapter) { save_progress(); changed = load_chapter(ctx, s_chapter - 1, 0, true); }
     else return reader_turn_chrome(ctx) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
-    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_chapter / BOOK_TOC_ROWS : 0; return APP_REDRAW_PAGE; }
+    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? book_toc_open(current_toc_position()) : 0; return APP_REDRAW_PAGE; }
     skip_hidden_image_pages(ctx, dir);
     if (!s_text) { s_view = SHELF; return APP_REDRAW_PAGE; }
     // 先选择旧布局的目标页，再切全屏，保留目标位置而不是跨过未读段落。
@@ -5636,7 +5674,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_toc_jump_open = s_toc_jump_drag = false;
                 s_reader_panel = READER_PANEL_NONE;
                 size_t toc = current_toc_position();
-                ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
+                ctx->leaf = book_toc_open(toc);
             } else if (i == 1) {
                 (void)bookmark_toggle();
             } else if (i == 2) {
@@ -6321,6 +6359,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         }
         int target = book_toc_hit(x, y, ctx->leaf, book_navigation_count());
         if (target == BOOK_TOC_BACK) {
+            if (book_toc_picker_close(&ctx->leaf)) return APP_REDRAW_PAGE;
             s_message[0] = 0;
             set_reader_view(READING);
             s_reader_panel = READER_PANEL_NONE;
@@ -6335,11 +6374,14 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             if (next != ctx->leaf) { ctx->leaf = next; return APP_REDRAW_PAGE; }
             return APP_REDRAW_NONE;
         }
+        if (target == BOOK_TOC_SELECT_VOLUME && !s_message[0])
+            return book_toc_picker_toggle(&ctx->leaf) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
         if (target == BOOK_TOC_JUMP && book_navigation_count()) {
             s_toc_jump_open = true;
             s_toc_jump_percent = (ctx->leaf + 1) * 100 / leaves();
             return APP_REDRAW_PAGE;
         }
+        if (!s_message[0] && book_toc_toggle(target, &ctx->leaf)) return APP_REDRAW_PAGE;
         if (target >= 0 && !s_message[0]) {
             size_t chapter = book_navigation_chapter((size_t)target);
             if (chapter >= book_chapter_count()) return APP_REDRAW_NONE;
@@ -7142,7 +7184,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
             set_reader_view(TOC);
             s_message[0] = 0;
             size_t toc = current_toc_position();
-            ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
+            ctx->leaf = book_toc_open(toc);
             return APP_REDRAW_PAGE;
         }
     }
@@ -7199,6 +7241,7 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     reader_indent_hold_cancel();
     s_reader_tap.pending = false;
     s_pressed_control = -1;
+    if (s_view == TOC && key == UI_KEY_2 && book_toc_picker_close(&ctx->leaf)) return APP_REDRAW_PAGE;
     if (s_view == TOC && s_toc_jump_open) {
         if (key == UI_KEY_2) s_toc_jump_open = s_toc_jump_drag = false;
         else if (key == UI_KEY_1 || key == UI_KEY_3) {
@@ -7259,6 +7302,7 @@ static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
     reader_indent_hold_cancel();
     s_reader_tap.pending = false;
     if (key != UI_KEY_2) return APP_REDRAW_NONE;
+    if (s_view == TOC && key == UI_KEY_2 && book_toc_picker_close(&ctx->leaf)) return APP_REDRAW_PAGE;
     if (s_view == TOC && s_toc_jump_open) {
         s_toc_jump_open = s_toc_jump_drag = false;
         return APP_REDRAW_PAGE;

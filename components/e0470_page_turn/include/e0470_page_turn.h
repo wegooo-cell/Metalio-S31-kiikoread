@@ -78,6 +78,9 @@ enum EpdDrawError e0470_text_turn_with_waveform(
 
 /// 倒置竖屏的上下柔和区与中间校准区同时逐相输出；区域须全逻辑宽、32列对齐。
 /// Inverted portrait: output soft chrome and calibrated middle art in the same phases; full logical width and 32-column alignment are required.
+/// S31外裁剪只需偶数边界，列选择映射向外对齐但驱动掩码仍精确；中间校准区仍32列对齐。/ S31 outer crops may be even-aligned: LUT mapping expands while drive masks stay exact; calibrated boundaries remain32-aligned.
+/// S31外围也允许显式DU表；缺GL模式时才选择DU，灰阶区始终保留指定模式。
+/// S31 chrome also accepts an explicit DU table when GL is absent; art retains its specified mode.
 /// 不错相、不改灰阶序列；仅临时2048B PSRAM，成功后一次提交真实back，失败留给调用方恢复。
 /// No staggering or sequence changes; use 2048 temporary PSRAM bytes, commit the real baseline once on success and let the caller recover failures.
 enum EpdDrawError e0470_update_regions(
@@ -85,6 +88,12 @@ enum EpdDrawError e0470_update_regions(
     const EpdWaveform* soft_waveform, const EpdWaveform* strong_waveform,
     enum EpdDrawMode strong_mode
 );
+
+#if KIIKO_BOARD_METALIO47
+/// S31列表原厂GC48清理：精确裁剪，不扩展到题头/底栏；成功才提交真实back。
+/// S31 list cleanup with raw GC48: exact crop without header/footer expansion; commit the real baseline only on success.
+enum EpdDrawError e0470_update_native_area(EpdiyHighlevelState* hl,EpdRect area,const EpdWaveform* waveform);
+#endif
 
 #ifdef __cplusplus
 }

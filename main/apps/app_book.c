@@ -18,8 +18,8 @@
  * User revision 2026-10-21: Pico reader entry uses one complete GC16; ordinary text retains calibrated GL16 erasure and equal-gray holds, prefetch and one fused progress output.
  * 用户2026-10-24修订：S31图文页和离图翻页同色保持，黑白端点单向推动；实际灰阶迁移保留完整GL48，仅黑白变化走DU20；进度合并，手动/周期清理仍完整GC48。
  * User revision 2026-10-24: S31 image turns/exits hold equal pixels and drive BW endpoints directionally; real gray changes retain complete GL48 while BW-only changes use DU20, with fused progress and manual/periodic GC48.
- * 用户2026-10-29修订：S31普通/图文沿用Moku GL37加六相白；速读独立DU加四相白，水波纹和GC48清理保持独立。
- * User revision2026-10-29: S31 ordinary/image turns retain Moku GL37 plus six whites; FastBW separately uses DU plus four whites, with independent ripple and GC48 cleanup.
+ * 用户2026-10-29：S31普通/图文原样采用Moku GL37加六相白；速读独立DU加四相，水波纹/GC48独立。
+ * User2026-10-29: S31 ordinary/image turns retain Moku GL37 plus six whites; separate FastBW DU adds four, with independent ripple/GC48.
  * 用户修订：正文中间双击固定切换全屏，单击左右各半或上1/3下2/3翻页，不受按键配置影响。
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户2026-10-24修订：S31阅读音量上/下键固定上一页/下一页，与底部键自定义独立。
@@ -28,7 +28,7 @@
  * 用户修订：单本管理为书架弹窗；管理页用于批量操作。分页和排序保留勾选，筛选/应用搜索及重扫清除勾选。
  * 失败进度仅按变更路径失效；删除后的清理重试保留到本次开机结束，不随切页释放。
  * 卡失效时先保存进度并关闭阅读资源，再由主循环回退字体；禁止自动续读失效挂载。
- * 用户最新修订：书架只保留深色书轨与亚克力，每页九本；收录导入及读过的书，移出仅隐藏，再读重新上架。
+ * 用户最新修订：书架保留深色书轨、亚克力及新增液态玻璃，每页九本；收录导入及读过的书，移出仅隐藏，再读重新上架。
  * 底栏保留首页/书架/文件/设置，设置直接进入设置页。
  * 用户修订：长按图书可用本机拼音输入编辑书名；阅读时长与翻页真实记录，供票根锁屏使用。
  * 用户最新修订：书名编辑可点选插入位置并用左右键微调，支持在文字中间插入和删除。
@@ -97,7 +97,7 @@
  * User revision: single-book actions use a shelf dialog; full management is for batches. Paging/sorting preserve selection; filtering/applied search and rescanning clear it.
  * Invalidate failed progress only for changed paths; retain deletion cleanup retries across page exits for this boot.
  * Lost media saves progress and closes reader resources before global font fallback; never auto-resume an invalid mount.
- * Latest user revision: the two retained shelf styles hold nine imported or read books; retired styles restore as acrylic, and removal hides until reread.
+ * Latest user revision: the retained grid styles including liquid glass hold nine imported or read books; retired styles restore as acrylic, and removal hides until reread.
  * The fourth tab opens Settings directly.
  * User revision: book details lead to an on-device Pinyin title editor; measured reading time and turns feed the ticket lock face.
  * Latest user revision: the title editor can place and move an insertion caret for edits in the middle of text.
@@ -688,7 +688,7 @@ static int shelf_rows(void) { return s_view == SHELF && app_settings_shelf_style
 #define SHELF_FAST_COVER_BYTES (SHELF_FAST_COVER_STRIDE * SHELF_FAST_COVER_HEIGHT)
 #define SHELF_FAST_CACHE_RESERVE (512u * 1024u)
 #define SHELF_GUARD_CACHE_BYTES (644u * 90u / 2u)
-typedef struct { EpdRect rect; int rotation, contrast; bool binary, valid; } shelf_guard_key_t;
+typedef struct { EpdRect rect; int rotation, contrast; uint8_t style; bool binary, valid; } shelf_guard_key_t;
 static uint8_t *s_guard_cache;
 static shelf_guard_key_t s_guard_keys[3];
 static bool s_guard_cache_attempted;
@@ -699,6 +699,7 @@ static void release_guard_cache(void) {
 // 缓存精确的输入和成品；逐行比对底图，任何封面、位置或模式变化均重绘。
 // Cache exact inputs and finished pixels; compare every input row so art, position and mode changes redraw.
 static void draw_shelf_guard(uint8_t *fb,EpdRect rect,int slot) {
+    const uint8_t style=app_settings_shelf_style();
     const bool binary=s_view==SHELF&&app_settings_main_fast_refresh();
     EpdRect p=ui_rotate_rect_to_fb(rect);
     const bool fits=slot>=0&&slot<3&&!(p.x&1)&&!(p.width&1)&&p.x>=0&&p.y>=0&&
@@ -710,20 +711,21 @@ static void draw_shelf_guard(uint8_t *fb,EpdRect rect,int slot) {
         if(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)>=bytes+2u*1024u*1024u)
             s_guard_cache=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     }
-    if(!fits||!s_guard_cache){ui_draw_acrylic_guard(fb,rect);if(binary)ui_acrylic_bw_rect(fb,rect);return;}
+    if(!fits||!s_guard_cache){if(style==6)ui_draw_liquid_shelf_rail(fb,rect);else ui_draw_acrylic_guard(fb,rect);if(binary)ui_acrylic_bw_rect(fb,rect);return;}
     shelf_guard_key_t *key=&s_guard_keys[slot];
     size_t stride=(size_t)epd_width()/2,span=(size_t)p.width/2;
     uint8_t *input=s_guard_cache+2u*slot*SHELF_GUARD_CACHE_BYTES,*output=input+SHELF_GUARD_CACHE_BYTES;
     bool same=key->valid&&key->rotation==epd_get_rotation()&&key->contrast==app_settings_system_contrast()&&
-        key->binary==binary&&!memcmp(&key->rect,&rect,sizeof(rect));
+        key->style==style&&key->binary==binary&&!memcmp(&key->rect,&rect,sizeof(rect));
     for(int y=0;same&&y<p.height;++y)
         same=!memcmp(fb+(size_t)(p.y+y)*stride+p.x/2,input+(size_t)y*span,span);
     if(!same) {
         key->valid=false;
         for(int y=0;y<p.height;++y)memcpy(input+(size_t)y*span,fb+(size_t)(p.y+y)*stride+p.x/2,span);
-        ui_draw_acrylic_guard(fb,rect);if(binary)ui_acrylic_bw_rect(fb,rect);
+        if(style==6)ui_draw_liquid_shelf_rail(fb,rect);else ui_draw_acrylic_guard(fb,rect);
+        if(binary)ui_acrylic_bw_rect(fb,rect);
         for(int y=0;y<p.height;++y)memcpy(output+(size_t)y*span,fb+(size_t)(p.y+y)*stride+p.x/2,span);
-        *key=(shelf_guard_key_t){.rect=rect,.rotation=epd_get_rotation(),.contrast=app_settings_system_contrast(),.binary=binary,.valid=true};
+        *key=(shelf_guard_key_t){.rect=rect,.rotation=epd_get_rotation(),.contrast=app_settings_system_contrast(),.style=style,.binary=binary,.valid=true};
     } else for(int y=0;y<p.height;++y)memcpy(fb+(size_t)(p.y+y)*stride+p.x/2,output+(size_t)y*span,span);
 }
 static EpdRect row_rect(int row) {
@@ -1096,6 +1098,14 @@ static void draw_shelf_cover(uint8_t* fb, EpdRect card, int row, const char* nam
     EpdRect image = shelf_cover_image(row);
     image.y += card.y - row_rect(row).y;
     const bool artwork = shelf_cover_frame_ready();
+    if (s_view == SHELF && app_settings_shelf_style() == 6) {
+        // 阴影在不透明封面外；合成只影响下方挡条，不让封面主体透底。
+        // Shadows sit outside opaque covers; only the bottom rail samples through the artwork.
+        for (int step=0;step<3;++step) {
+            uint8_t gray=(uint8_t)(0xd0+step*0x10);
+            ui_fill_rect_fast((EpdRect){image.x+image.width+step*2,image.y+4+step,2,image.height-2},gray,fb);
+        }
+    }
     ui_fill_rect_fast(image, UI_GRAY_LIGHT, fb);
     if (artwork && app_settings_main_fast_refresh() && s_view==SHELF && fast_cover_matches(row,image)) {
         ui_blit_mono_bitmap(fb,image,s_covers[row].fast_bits,SHELF_FAST_COVER_STRIDE);
@@ -1155,6 +1165,12 @@ cover_raster_done:;
                    title, EPD_DRAW_ALIGN_CENTER, false);
     }
     ui_draw_round_rect(fb, image, 0, UI_GRAY_BLACK);
+    if (s_view == SHELF && app_settings_shelf_style() == 6) {
+        epd_draw_line(image.x+4,image.y+1,image.x+4,image.y+image.height-2,0xa0,fb);
+        epd_draw_line(image.x+5,image.y+1,image.x+5,image.y+image.height-2,0xe0,fb);
+        if(app_settings_main_fast_refresh())
+            ui_acrylic_bw_rect(fb,(EpdRect){image.x,image.y,image.width+6,image.height+4});
+    }
     if (favorite && image.width >= 28 && image.height >= 42) {
         draw_shelf_favorite_icon(fb, image.x + 10, image.y + 8, 24, 31,
                                  artwork && ((app_settings_main_fast_refresh() && s_view == SHELF && fast_cover_matches(row, image))
@@ -1230,7 +1246,8 @@ static void draw_shelf_furniture(uint8_t* fb) {
         } else if (style == 2) {
             EpdRect acrylic = {20, top + 136, 644, 90};
             draw_shelf_guard(fb, acrylic, row);
-
+        } else if (style == 6) {
+            draw_shelf_guard(fb, (EpdRect){20, top + 188, 644, 42}, row);
         }
     }
 }
@@ -1356,11 +1373,14 @@ static void reader_footer_strip_number(char *dst, size_t cap, const char *source
     if (!*name || !strcmp(name, "本章") || !strcmp(name, "章节")) name = "";
     copy_text(dst, cap, name);
 }
+static size_t reader_page_offset(size_t page);
 static void reader_footer_chapter_name(char *dst, size_t cap) {
     char source[128] = {0};
-    bool selected = s_selected_toc < book_navigation_count() &&
-        book_navigation_chapter(s_selected_toc) == s_chapter &&
-        book_navigation_title(s_selected_toc, source, sizeof(source)) == ESP_OK && source[0];
+    size_t toc=s_selected_toc;
+    if(book_kind()==BOOK_KIND_TXT){size_t current=book_navigation_position(s_chapter,reader_page_offset(s_page));if(current!=SIZE_MAX)toc=current;}
+    bool selected = toc < book_navigation_count() &&
+        book_navigation_chapter(toc) == s_chapter &&
+        book_navigation_title(toc, source, sizeof(source)) == ESP_OK && source[0];
     if (!selected) {
         if (s_chapter_heading_title[0]) copy_text(source, sizeof(source), s_chapter_heading_title);
         else if (book_chapter_title(s_chapter, source, sizeof(source)) != ESP_OK) source[0] = 0;
@@ -3912,6 +3932,7 @@ static void reader_prefetch_idle(app_ctx_t *ctx) {
 #endif
 }
 static size_t current_toc_position(void) {
+    if(book_kind()==BOOK_KIND_TXT){size_t current=book_navigation_position(s_chapter,reader_page_offset(s_page));if(current!=SIZE_MAX)return current;}
     size_t count = book_navigation_count();
     if (s_selected_toc < count && book_navigation_chapter(s_selected_toc) == s_chapter)
         return s_selected_toc;
@@ -4153,6 +4174,20 @@ static bool reader_slider_feedback_present(app_ctx_t *ctx,app_redraw_t redraw) {
     guard_draw_result(ctx->hl,err);return true;
 }
 #endif
+#if KIIKO_BOARD_METALIO47
+static enum EpdDrawError reader_soft_present(app_ctx_t* ctx,EpdRect area) {
+    const EpdWaveform* wave=display_reader_soft_turn_waveform();
+    // 阅读的六相等白维护必须覆盖留白，否则差分行列掩码会留下较白的文字矩形。
+    // Reading's six equal-white drives must reach blank margins; dirty-only masks otherwise leave a brighter text rectangle.
+    // 保留Moku原相序和等黑/等灰保持；仅扩大本轮掩码，不添加GC、额外相位或第二次输出。
+    // Retain Moku's phases and equal black/gray holds; widen only this scan's mask without GC, extra phases or a second output.
+    const bool whole=area.x==0&&area.y==0&&area.width==UI_LOCK_WIDTH&&area.height==UI_LOCK_HEIGHT;
+    return whole
+        ? update_display_area_full_with(ctx->hl,wave,MODE_GL16,area)
+        : update_display_area_diff_with(ctx->hl,wave,MODE_GL16,area);
+}
+#endif
+
 static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
 #if KIIKO_BOARD_METALIO47
     if(s_view==READING&&s_reader_panel==READER_PANEL_ONLINE_FONTS){
@@ -4242,13 +4277,10 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             if (s_reader_fullscreen) image_area = ui_rect_union(image_area, reader_fullscreen_progress_area());
             else if (s_reader_footer_pending) image_area = ui_rect_union(image_area, progress_rect());
         }
-        // 章首/图文页也走同一套柔和差分：只推变化像素、整屏一次输出，不再走整页灰阶过渡。
-        // Chapter-start/image pages use the same soft difference: changed pixels only,
-        // one whole-panel output instead of a full-page gray transition.
+        // Moku普通/图文方案：GL37加六相目标白，整屏进度同轮输出。
+        // Moku ordinary/image profile: GL37 plus six white-target phases and progress in one whole-panel output.
         (void)image_area;
-        err = update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(),
-                                             MODE_GL16,
-                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
+        err=reader_soft_present(ctx,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
     }
 #else
     else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
@@ -4318,18 +4350,15 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
 #endif
         err = s_water_turn_pending
 #if KIIKO_BOARD_METALIO47
-            ? update_display_water_turn(ctx->hl, turn_area, s_water_turn_dir)
+            ? update_display_water_turn(ctx->hl,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},s_water_turn_dir)
 #else
             ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
 #endif
 #if KIIKO_BOARD_METALIO47
             : s_reader_turn_pending && s_mode==MODE_GL16 && app_settings_reader_turn_effect()==2
-                ? update_display_text_turn(ctx->hl,turn_area,E0470_TURN_RTL)
+                ? update_display_text_turn(ctx->hl,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT},E0470_TURN_RTL)
             : s_reader_turn_pending && s_mode==MODE_GL16
-                // 普通采用Moku六相目标白方案；速读由上方独立DU出口保留。
-                // Ordinary retains Moku's six white-target phases; the separate DU outlet above preserves FastBW.
-                ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), s_mode,
-                                                (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT})
+                ? reader_soft_present(ctx,(EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT})
 #else
             : s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
               s_view == READING && s_presented_view == (int)READING &&
@@ -4339,14 +4368,14 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             // 普通翻页继续原灰阶差分；速读仅进入已验证的纯文字出口。
             // Ordinary keeps its gray differences; Fast BW enters only the qualified pure-text outlet.
 #endif
-            // 普通翻页与全屏阅读都只驱动变化像素；设置面板等局部绘制保留原路径。
-            // Ordinary turns and full-screen reading drive changed pixels only; other local UI keeps its path.
+            // 普通翻页保留差分迁移；S31整页目标统一维护白底，局部控件仍保留原路径。
+            // Retain ordinary difference transitions; S31 whole-page targets maintain uniform white while local controls keep their paths.
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
-                ? update_display_area_diff_with(ctx->hl,
 #if KIIKO_BOARD_METALIO47
-                     display_reader_soft_turn_waveform(), s_mode,
-                     s_reader_turn_pending ? (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT} : turn_area)
+                ? reader_soft_present(ctx,s_reader_turn_pending?
+                    (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT}:turn_area)
 #else
+                ? update_display_area_diff_with(ctx->hl,
                     s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
 #endif
                 : update_display_area_with(ctx->hl, &E0470_WAVEFORM, s_mode, s_area);
@@ -5670,7 +5699,7 @@ static app_redraw_t turn_page(app_ctx_t* ctx, int dir) {
     else if (dir > 0 && s_chapter + 1 < book_chapter_count()) { save_progress(); changed = load_chapter(ctx, s_chapter + 1, 0, false); }
     else if (dir < 0 && s_chapter) { save_progress(); changed = load_chapter(ctx, s_chapter - 1, 0, true); }
     else return reader_turn_chrome(ctx) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
-    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? s_chapter / BOOK_TOC_ROWS : 0; return APP_REDRAW_PAGE; }
+    if (!changed) { set_reader_view(s_text ? TOC : SHELF); ctx->leaf = s_text ? book_toc_open(current_toc_position()) : 0; return APP_REDRAW_PAGE; }
     skip_hidden_image_pages(ctx, dir);
     if (!s_text) { s_view = SHELF; return APP_REDRAW_PAGE; }
     // 先选择旧布局的目标页，再切全屏，保留目标位置而不是跨过未读段落。
@@ -6362,7 +6391,7 @@ static app_redraw_t reader_panel_action(app_ctx_t* ctx, uint16_t x, uint16_t y) 
                 s_toc_jump_open = s_toc_jump_drag = false;
                 s_reader_panel = READER_PANEL_NONE;
                 size_t toc = current_toc_position();
-                ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
+                ctx->leaf = book_toc_open(toc);
             } else if (i == 1) {
                 (void)bookmark_toggle();
             } else if (i == 2) {
@@ -7056,6 +7085,7 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
         }
         int target = book_toc_hit(x, y, ctx->leaf, book_navigation_count());
         if (target == BOOK_TOC_BACK) {
+            if (book_toc_picker_close(&ctx->leaf)) return APP_REDRAW_PAGE;
             s_message[0] = 0;
             set_reader_view(READING);
             s_reader_panel = READER_PANEL_NONE;
@@ -7070,11 +7100,14 @@ static app_redraw_t action_at(app_ctx_t* ctx, uint16_t x, uint16_t y) {
             if (next != ctx->leaf) { ctx->leaf = next; return APP_REDRAW_PAGE; }
             return APP_REDRAW_NONE;
         }
+        if (target == BOOK_TOC_SELECT_VOLUME && !s_message[0])
+            return book_toc_picker_toggle(&ctx->leaf) ? APP_REDRAW_PAGE : APP_REDRAW_NONE;
         if (target == BOOK_TOC_JUMP && book_navigation_count()) {
             s_toc_jump_open = true;
             s_toc_jump_percent = (ctx->leaf + 1) * 100 / leaves();
             return APP_REDRAW_PAGE;
         }
+        if (!s_message[0] && book_toc_toggle(target, &ctx->leaf)) return APP_REDRAW_PAGE;
         if (target >= 0 && !s_message[0]) {
             size_t chapter = book_navigation_chapter((size_t)target);
             if (chapter >= book_chapter_count()) return APP_REDRAW_NONE;
@@ -7940,7 +7973,7 @@ static app_redraw_t gesture_event(app_ctx_t* ctx, const ui_gesture_event_t* ev) 
             set_reader_view(TOC);
             s_message[0] = 0;
             size_t toc = current_toc_position();
-            ctx->leaf = toc == SIZE_MAX ? 0 : (int)(toc / BOOK_TOC_ROWS);
+            ctx->leaf = book_toc_open(toc);
             return APP_REDRAW_PAGE;
         }
     }
@@ -8020,6 +8053,7 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
     reader_indent_hold_cancel();
     s_reader_tap.pending = false;
     s_pressed_control = -1;
+    if (s_view == TOC && key == UI_KEY_2 && book_toc_picker_close(&ctx->leaf)) return APP_REDRAW_PAGE;
     if (s_view == TOC && s_toc_jump_open) {
         if (key == UI_KEY_2) s_toc_jump_open = s_toc_jump_drag = false;
         else if (key == UI_KEY_1 || key == UI_KEY_3) {
@@ -8086,6 +8120,7 @@ static app_redraw_t on_key_long(app_ctx_t* ctx, int key) {
     reader_indent_hold_cancel();
     s_reader_tap.pending = false;
     if (key != UI_KEY_2) return APP_REDRAW_NONE;
+    if (s_view == TOC && key == UI_KEY_2 && book_toc_picker_close(&ctx->leaf)) return APP_REDRAW_PAGE;
     if (s_view == TOC && s_toc_jump_open) {
         s_toc_jump_open = s_toc_jump_drag = false;
         return APP_REDRAW_PAGE;

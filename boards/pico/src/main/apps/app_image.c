@@ -24,6 +24,9 @@
 #include "ui_kit.h"
 #include "ui_menu.h"
 #include "ui_nav.h"
+#include "settings.h"
+#include "ui_glass.h"
+#include "e0470_epaper_waveform.h"
 
 #define IMAGE_MAX 96
 #define IMAGE_BYTES_MAX BOOK_IMAGE_FILE_MAX
@@ -47,11 +50,14 @@ static uint8_t *s_gray;
 static unsigned s_width, s_height;
 static char s_message[96];
 static bool s_viewing;
+#include "image_lock_menu.inc"
+#define IMAGE_ACTION_REDRAW APP_REDRAW_PAGE
 static char s_requested_path[256];
 
 bool app_image_request_open(const char *path) {
     if (!path || !path[0] || strnlen(path, sizeof(s_requested_path)) >= sizeof(s_requested_path)) return false;
     snprintf(s_requested_path, sizeof(s_requested_path), "%s", path);
+    s_requested_lock_mode=IMAGE_LOCK_ANY;
     return true;
 }
 
@@ -142,7 +148,8 @@ static bool load_image(int index) {
                                   : book_image_dimensions(data, size, item->png, &width, &height);
     if (!dimensions_ok || !width || !height) { strcpy(s_message, "图片格式不支持"); return false; }
     unsigned fit_w = UI_LOCK_WIDTH, fit_h = (uint64_t)height * fit_w / width;
-    if (fit_h > UI_LOCK_HEIGHT) { fit_h = UI_LOCK_HEIGHT; fit_w = (uint64_t)width * fit_h / height; }
+    const unsigned image_height=UI_LOCK_HEIGHT-56;
+    if (fit_h > image_height) { fit_h = image_height; fit_w = (uint64_t)width * fit_h / height; }
     if (!fit_w) fit_w = 1;
     if (!fit_h) fit_h = 1;
     s_gray = heap_caps_malloc((size_t)fit_w * fit_h, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -158,18 +165,27 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     (void)ctx;
     ui_clear_page(fb);
     if (s_viewing && s_gray) {
-        int x0 = (UI_LOCK_WIDTH - s_width) / 2, y0 = (UI_LOCK_HEIGHT - s_height) / 2;
+        int x0 = (UI_LOCK_WIDTH - s_width) / 2, y0 = (UI_LOCK_HEIGHT - 56 - s_height) / 2;
         for (unsigned y = 0; y < s_height; ++y)
             for (unsigned x = 0; x < s_width; ++x)
                 epd_draw_pixel(x0 + x, y0 + y,
                     ui_image_dither_gray(s_gray[(size_t)y * s_width + x], x0 + x, y0 + y), fb);
+        if (!s_lock_menu)
+            ui_text_vc(fb,342,UI_LOCK_HEIGHT-28,20,s_lock_mode==IMAGE_LOCK_BOOKMARK?
+                "左右滑动切换图片 · 点按设置透明书封":"左右滑动切换图片 · 点按设置壁纸",EPD_DRAW_ALIGN_CENTER,false);
+        if(s_lock_menu)image_lock_menu_draw(fb);
+        else if(s_message[0]){
+            ui_fill_round_rect(fb,(EpdRect){60,1100,564,66},16,UI_GRAY_WHITE);
+            ui_text_vc(fb,342,1133,24,s_message,EPD_DRAW_ALIGN_CENTER,false);
+        }
         return;
     }
     ui_nav_status(fb);
     ui_nav_back(fb, 36, 79);
-    ui_text_vc(fb, 342, 107, 34, "图片", EPD_DRAW_ALIGN_CENTER, false);
+    ui_text_vc(fb,342,107,34,s_lock_mode==IMAGE_LOCK_WALLPAPER?"壁纸锁屏":
+        s_lock_mode==IMAGE_LOCK_BOOKMARK?"透明书封":"图片",EPD_DRAW_ALIGN_CENTER,false);
     char caption[64];
-    snprintf(caption, sizeof(caption), "%d 张 · JPG / PNG", s_count);
+    snprintf(caption,sizeof(caption),s_lock_mode==IMAGE_LOCK_BOOKMARK?"%d 张 · 透明 PNG":"%d 张 · JPG / PNG",s_count);
     ui_text(fb, 36, 165, 21, caption, EPD_DRAW_ALIGN_LEFT, false);
     ui_hairline(fb, 202, 36, 612, UI_GRAY_LIGHT);
     for (int row = 0; row < IMAGE_ROWS; ++row) {
@@ -192,10 +208,15 @@ static bool present(app_ctx_t *ctx, app_redraw_t redraw) {
     if (redraw == APP_REDRAW_NONE) return true;
     if (!s_viewing) return false;
     render(ctx, ctx->fb);
-    guard_draw_result(ctx->hl, update_display_image_gray(ctx->hl));
+    // One Pico-native gray difference for browsing/menu actions; explicit full refresh keeps its own route.
+    enum EpdDrawError result=redraw==APP_REDRAW_FULL ? update_display_full(ctx->hl)
+        : update_display_area_diff_with(ctx->hl,&E0470_FULL_WAVEFORM,MODE_GL16,
+                                       (EpdRect){0,0,UI_LOCK_WIDTH,UI_LOCK_HEIGHT});
+    guard_draw_result(ctx->hl,result);
     return true;
 }
 static void on_enter(app_ctx_t *ctx) {
+    s_lock_menu=false;s_lock_mode=s_requested_lock_mode;s_requested_lock_mode=IMAGE_LOCK_ANY;
     (void)ctx;
     s_page = 0; s_viewing = false; s_message[0] = 0; scan_images();
     if (s_requested_path[0]) {
@@ -203,15 +224,16 @@ static void on_enter(app_ctx_t *ctx) {
         s_requested_path[0] = 0;
     }
 }
-static void image_on_exit(app_ctx_t *ctx) { (void)ctx; free(s_gray); s_gray = NULL; s_viewing = false; }
-static void on_media_lost(app_ctx_t *ctx) { (void)ctx; free(s_gray); s_gray = NULL; s_viewing = false; scan_images(); }
+static void image_on_exit(app_ctx_t *ctx) { s_lock_menu=false;s_lock_mode=IMAGE_LOCK_ANY; (void)ctx; free(s_gray); s_gray = NULL; s_viewing = false; }
+static void on_media_lost(app_ctx_t *ctx) { s_lock_menu=false; (void)ctx; free(s_gray); s_gray = NULL; s_viewing = false; scan_images(); }
 static app_redraw_t move_image(int delta) {
     int next = s_selected + delta;
     if (next < 0 || next >= s_count) return APP_REDRAW_NONE;
     if (!load_image(next)) s_viewing = false;
-    return APP_REDRAW_FULL;
+    return IMAGE_ACTION_REDRAW;
 }
 static app_redraw_t on_key(app_ctx_t *ctx, int key) {
+    if(s_lock_menu){s_lock_menu=false;s_message[0]=0;return IMAGE_ACTION_REDRAW;}
     if (key == UI_KEY_2) { ctx->request_app = app_home_page(); return APP_REDRAW_NONE; }
     if (s_viewing) {
         s_viewing = false; free(s_gray); s_gray = NULL; return APP_REDRAW_PAGE;
@@ -222,12 +244,37 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
 static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *event) {
     (void)ctx;
     if (s_viewing) {
+        if(s_lock_menu){
+            if(event->type!=UI_GESTURE_TAP)return APP_REDRAW_NONE;
+            const unsigned actions=image_lock_action_count();
+            for(unsigned i=0;i<=actions;++i){
+                if(!ui_rect_hit(image_lock_option(i),event->x0,event->y0))continue;
+                if(i==actions){s_lock_menu=false;s_message[0]=0;return IMAGE_ACTION_REDRAW;}
+                if(!s_items||s_selected<0||s_selected>=s_count||!s_gray||!s_items[s_selected].path[0]){
+                    snprintf(s_message,sizeof(s_message),"当前图片无法设定");return IMAGE_ACTION_REDRAW;
+                }
+                const unsigned style=image_lock_style(i);
+                if(style==3&&!s_items[s_selected].png){
+                    snprintf(s_message,sizeof(s_message),"透明书封请选择 PNG 图片");return IMAGE_ACTION_REDRAW;
+                }
+                const char *path=s_items[s_selected].path;
+                if(style==1)app_settings_set_wallpaper_path(path);else app_settings_set_bookmark_path(path);
+                const char *saved=style==1?app_settings_wallpaper_path():app_settings_bookmark_path();
+                if(strcmp(saved,path)){snprintf(s_message,sizeof(s_message),"设定未完成，请重试");return IMAGE_ACTION_REDRAW;}
+                app_settings_set_lock_style(style);
+                if(app_settings_lock_style()!=style){snprintf(s_message,sizeof(s_message),"设定未完成，请重试");return IMAGE_ACTION_REDRAW;}
+                s_lock_menu=false;
+                snprintf(s_message,sizeof(s_message),"%s",style==1?"已设为壁纸锁屏":"已设为透明书封");
+                return IMAGE_ACTION_REDRAW;
+            }
+            s_lock_menu=false;s_message[0]=0;return IMAGE_ACTION_REDRAW;
+        }
         if (event->type == UI_GESTURE_SWIPE_L) return move_image(1);
         if (event->type == UI_GESTURE_SWIPE_R) return move_image(-1);
         if (event->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
         if (event->x0 < UI_LOCK_WIDTH / 3) return move_image(-1);
         if (event->x0 > UI_LOCK_WIDTH * 2 / 3) return move_image(1);
-        s_viewing = false; free(s_gray); s_gray = NULL; return APP_REDRAW_PAGE;
+        s_lock_menu=true;s_message[0]=0;return IMAGE_ACTION_REDRAW;
     }
     if (event->type == UI_GESTURE_SWIPE_L && (s_page + 1) * IMAGE_ROWS < s_count) {
         ++s_page;
@@ -238,22 +285,27 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *event) 
         return APP_REDRAW_PAGE;
     }
     if (event->type != UI_GESTURE_TAP) return APP_REDRAW_NONE;
-    if (event->y0 < 160 && event->x0 < 120) { ctx->request_return = true; return APP_REDRAW_NONE; }
+    if (event->y0 < 160 && event->x0 < 120) {
+            ctx->request_return = true; return APP_REDRAW_NONE;
+    }
 
     for (int row = 0; row < IMAGE_ROWS; ++row) {
         int idx = s_page * IMAGE_ROWS + row;
         if (idx >= s_count) break;
         if (ui_rect_hit((EpdRect){36, 214 + row * 101, 612, 84}, event->x0, event->y0)) {
             if (!load_image(idx)) s_viewing = false;
-            return APP_REDRAW_FULL;
+            return IMAGE_ACTION_REDRAW;
         }
     }
     return APP_REDRAW_NONE;
 }
-static bool image_edge_back(app_ctx_t *ctx) { (void)ctx; return true; }
+static bool image_edge_back(app_ctx_t *ctx) {
+    (void)ctx;
+    return !s_viewing&&!s_lock_menu;
+}
 static bool menu_handle_enabled(app_ctx_t *ctx) { (void)ctx; return false; }
 const app_desc_t app_image = {
-    .binary_ui = true,
+    .binary_ui = false,
     .title = "图片对比 Images", .detail = "灰阶测试图 / TF 卡 JPG PNG", .enter_full = false,
     .owns_keys = true, .menu_handle_enabled = menu_handle_enabled, .edge_back_enabled = image_edge_back,
     .on_enter = on_enter, .on_exit = image_on_exit, .on_media_lost = on_media_lost,

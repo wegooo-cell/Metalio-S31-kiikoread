@@ -2,8 +2,8 @@
  * 中文：阅读采用默认灰阶表相序（厂家 2.0.76 起完整 GL48），等值保持由派生表保证。
  * English: Reading uses the default gray-table order (full GL48 since vendor 2.0.76)
  *         with equal pairs held by the derived table.
- * 用户2026-10-29：普通保留Moku的GL37加六相白；速读独立保留DU，并追加四相白后保留原定稿保持。
- * User2026-10-29: retain Moku's GL37 plus six whites for ordinary turns; FastBW keeps DU and inserts four whites before its original settle holds.
+ * 用户2026-10-29：普通保留Moku GL37加六相白，速读所选DU加四相白并保留定稿。
+ * User2026-10-29: ordinary retains Moku GL37 plus six whites; FastBW adds four whites to the selected DU and retains settling.
  */
 #include "display_reader_waveform.h"
 #include "display_main_waveform.h"
@@ -18,11 +18,6 @@
 #define PANEL_LUT_ATTR
 #endif
 #endif
-// GL37 面板表本身已是 16 级、等值全保持的正文序列；启用时直接用它做普通翻页表，
-// 比完整 GL48 少 11 相、比四级22相实验多出真实抗锯齿灰阶。
-// The GL37 panel profile is already a 16-level, equal-held body sequence: use it for ordinary
-// turns when available -- eleven fewer scans than GL48 and real antialiasing levels instead of
-// the four-level22-phase experiment.
 const EpdWaveform* display_reader_text_waveform(void) {
     const EpdWaveform* panel37=display_reader_panel37_waveform();
     return panel37?panel37:&E0470_TEXTTURN_WAVEFORM;

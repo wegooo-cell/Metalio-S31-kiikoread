@@ -81,11 +81,10 @@ void display_monochrome_frame(uint8_t* fb);
 bool display_system_binary_set(bool enabled);
 /// 常驻底栏的根页/子页保留灰阶，只二值化内容，返回旧值供恢复。/ Persistent root/child navigation retains gray; binarize content only and return the prior scope.
 bool display_system_navigation_set(bool visible);
-#else
+#endif
 /// 系统侧滑用主页灰阶水波纹，独立于阅读文字序列；区域必须是逻辑坐标。
 /// System edge returns use main-gray ripple independently of reader text; the area uses logical coordinates.
 enum EpdDrawError update_display_main_turn(EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir);
-#endif
 /// 当前主页面最多三个横向灰阶条带，其余内容按黑白驱动；无入口许可时忽略。
 /// Register at most three horizontal gray bands on the armed main page; other content uses black/white. Ignore without permission.
 void display_main_transition_gray_bands(const EpdRect* bands, unsigned count);
@@ -140,6 +139,11 @@ enum EpdDrawError update_display_area_diff_with(
     EpdiyHighlevelState* hl, const EpdWaveform* waveform, enum EpdDrawMode mode,
     EpdRect area
 );
+#if KIIKO_BOARD_METALIO47
+/// S31列表按身份/范围累计真实滚动；每八次用原厂GC48替换当次输出，不额外补刷。
+/// S31 lists accrue changed scrolls by identity/crop; every eighth output uses raw GC48 without an extra pass.
+enum EpdDrawError update_display_settings_list(EpdiyHighlevelState* hl,unsigned list_id,EpdRect area);
+#endif
 /// area始终为旋转后逻辑坐标，勿传物理epd_full_screen。/ area always uses rotated logical coordinates, never physical epd_full_screen.
 /// 阅读页可选的真实错相 GL16 翻页；缺相位时回退现有 GL16，失败时恢复基准帧。
 /// 纯文字水波纹复用柔和文字灰边，8带节拍不变；缺相回退GL16，扫描失败重建真实基准。
@@ -173,6 +177,10 @@ int display_pclk_mhz(void);
 /// 出现供数不足就退回安全频率并整屏重刷，其它错误码原样忽略。
 /// On underrun, drop to the safe clock and full-refresh; other error bits are ignored.
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result);
+
+/// 根页切换补白许可：0关闭、6普通、8涉及书架，仅在一次真实根页推屏中生效并恢复。
+/// Scope board root whitening:0 off,6 ordinary,8 involving the shelf; restore the prior value after presentation.
+unsigned display_main_quality_set(unsigned white_phases);
 
 #ifdef __cplusplus
 }

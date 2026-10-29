@@ -69,6 +69,8 @@ static int quick_draws, quick_opens, quick_du, wifi_starts, wifi_stops, ble_rese
 static int persistent_ripple_height;
 static int edge_returns,back_ripples,monochrome_calls,last_ripple_dir;
 static bool binary_scope,navigation_scope;
+unsigned display_main_quality_set(unsigned v){(void)v;return 0;}
+enum EpdDrawError update_display_main_turn(EpdiyHighlevelState*h,EpdRect r,int d){return update_display_water_turn(h,r,d);}
 bool display_main_switch_erase_set(bool v){(void)v;return false;}
 bool display_main_shelf_home_erase_set(bool v){(void)v;return false;}
 bool app_sleep_media_ready(void){return true;}
@@ -306,6 +308,13 @@ void ui_draw_menu_page(uint8_t*f,const app_desc_t*a,int l) {(void)f;menu_backgro
 int ui_menu_hit_test(uint16_t x,uint16_t y,int l) {(void)l;if(x==550&&y==500)return UI_MENU_HIT_NEXT;return x<500&&y>=100&&y<300?(y-100)/100:-1;}
 bool ui_menu_row_rect(int l,int r,EpdRect*out) {(void)l;*out=(EpdRect){0,r*100+100,500,100};return r>=0&&r<2;}
 void ui_draw_menu_row_pressed(uint8_t*f,const app_desc_t*a,int l,int r,bool p) {(void)f;(void)a;(void)l;(void)r;if(p)highlights++;else restores++;}
+static bool gray_list_ui(app_ctx_t*c){(void)c;return true;}
+static int gray_list_outputs;
+static bool gray_list_present(app_ctx_t*c,app_redraw_t redraw){
+    (void)c;assert(!binary_scope);
+    if(redraw==APP_REDRAW_PAGE||redraw==APP_REDRAW_FULL){++gray_list_outputs;return true;}
+    return false;
+}
 static void enter(app_ctx_t*c) {(void)c;enters++;}
 static void leave(app_ctx_t*c) {(void)c;exits++;}
 static void render(app_ctx_t*c,uint8_t*f) {(void)c;(void)f;}
@@ -851,6 +860,14 @@ int main(void) {
         add(60,110,1,0);add(0,0,0,0);run();
         assert(!back_ripples&&binary_outputs==1&&!binary_scope&&!navigation_scope);
     }
+    for(int policy=0;policy<3;++policy){
+        reset();enable_main_tabs();second.binary_ui=true;second.grayscale_ui=gray_list_ui;
+        second.present=gray_list_present;fake_target_index=3;gray_list_outputs=0;
+        main_fast=policy==1;main_water=policy==2;
+        add(340,1160,1,0);add(0,0,0,0);run();
+        assert(gray_list_outputs==1&&!binary_outputs&&!binary_scope&&!navigation_scope);
+    }
+    puts("PASS: actual S31 scheduler admits gray settings presenter in all root modes without binary normalization or duplicate output");
     puts("PASS: system roots honor Water, child taps/top-left stay ordinary, edge returns use logical portrait LTR, scoped navigation restored");
     puts("PASS: S31 edge/central right-swipe return admission,one output,short/status/multitouch/refused boundaries");
     puts("PASS: real loop with real anti-fade: idle refresh, no transfer/modal-owner refresh or wake; legacy quick/PIN/sleep gates retained");

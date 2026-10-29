@@ -177,25 +177,23 @@ int main(void) {
     }
     assert(!memcmp(saved_bw,original_bw->luts,sizeof(saved_bw))&&!memcmp(saved_gray,gray_table->luts,sizeof(saved_gray)));
     puts("PASS: all256 UI pairs restore complete original soft grays including light cards; directional white erase/equal holds/vendor LUTs retained; optical validation pending");
-    // 设置滚动保留全部中灰迁移及等灰保持，白色只去掉额外四相，原DU擦除逐相不变。
-    // Settings scrolling preserves every midgray transition and equal hold, omitting only four extra white phases while retaining native DU erasure phase by phase.
+    // Keep every native changed-pixel action and insert eight white-only phases before settling.
     const EpdWaveform *scroll_wave=display_settings_scroll_waveform();
     const EpdWaveformPhases *scroll=e0470_waveform_phases(scroll_wave,MODE_GL16);
-    assert(scroll&&scroll->phases==soft_ui->phases&&scroll->phase_times==soft_ui->phase_times);
+    assert(scroll&&scroll->phases==soft_ui->phases+8&&!scroll->phase_times);
     assert(scroll_wave->temp_intervals==display_main_normal_waveform()->temp_intervals);
-    unsigned removed_white=0;
+    const int drive=soft_ui->phases-3;
+    unsigned added_white=0;
     for(int to=0;to<16;++to)for(int from=0;from<16;++from)for(int f=0;f<scroll->phases;++f) {
         int actual=e0470_phase_action(scroll,f,to,from);
-        int prior=e0470_phase_action(soft_ui,f,to,from);
-        if(to==15&&from!=15){
-            int expected=f<original_bw->phases?e0470_phase_action(original_bw,f,to,from):0;
-            assert(actual==expected);
-            if(actual!=prior){assert(actual==0&&prior==2&&f>=20&&f<24);++removed_white;}
-        } else assert(actual==prior);
-        if(to==from)assert(actual==0);
+        int expected=from==to?0:f<drive?e0470_phase_action(soft_ui,f,to,from):
+            f<drive+8?(to==15?2:0):e0470_phase_action(soft_ui,f-8,to,from);
+        assert(actual==expected);
+        if(f>=drive&&f<drive+8&&actual==2)++added_white;
+        if(f>=drive+8)assert(actual==0);
     }
-    assert(removed_white==15*4&&display_settings_scroll_waveform()==scroll_wave);
+    assert(added_white==15*8&&display_settings_scroll_waveform()==scroll_wave);
     assert(!memcmp(saved_bw,original_bw->luts,sizeof(saved_bw))&&!memcmp(saved_gray,gray_table->luts,sizeof(saved_gray)));
-    puts("PASS: settings scroll retains AA gray transitions, native DU white erasure, equal holds and all37 phases; removes only four added white pulses per changing white pair; other profiles unchanged");
+    puts("PASS: settings scroll45 retains native white erasure and all AA gray transitions, adds eight changed-white pulses before three settle holds, equal grays/cache/vendor unchanged");
     return 0;
 }

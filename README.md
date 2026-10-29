@@ -12,8 +12,19 @@ Publicly available kiikoread firmware sources adapted for **Metalio E-INK4 Plus 
 
 Official binaries remain archived in the shared release repository; this repository maintains Metalio S31 sources. Older test Releases here are previews. Metalio and Pico use separate chip targets, power drivers, waveforms and partitions; their images are not interchangeable.
 
+### TXT navigation
+
+TXT recognizes numbered Chinese/English headings (including canonical Roman Chapter/Part numbers), Markdown headings at levels1–3, conventional prologues/extras/appendices, consistent long separators, and conservatively sequenced numeric headings. Heading boundaries reject obvious prose/invalid numeral tokens. A bounded leading Contents/目录 list is excluded only when the body independently provides at least two headings; ambiguous list-only documents remain usable. Rules were compared with [txtautotoc](https://github.com/cchenhen/txtautotoc); its whole-file Lua parser is not embedded. Long or indented titles do not need to fit the legacy40-byte label. Locations are allocated in1KiB pages with a hard16384-entry/128KiB cap; only eight titles are cached and body text remains segmented. On allocation/candidate exhaustion, retain legacy navigation and its existing file/segment limits. The first open streams the source; subsequent opens validate a checksummed index. Missing/unwritable caches do not prevent indexing.
+
+Visible TXT navigation targets offsets inside the original reading segments, preserving existing chapter-based progress and bookmark IDs without rewriting books. Rules apply to both boards; encoding backends retain their existing capabilities (UTF8/GBK on both and UTF16 onS31).
+
+### English wrapping
+
+Horizontal TXT/EPUB reading uses bounded Liang/TeX en-US pattern hyphenation and per-line cubic word-space badness. Normal body lines stretch or shrink actual spaces, leaving letter spacing unchanged; paragraph endings retain natural width. Pattern cuts preserve at least two original letters before and three after, with a break penalty favoring well-spaced whole words. This is a line-local method, not full paragraph-wide Knuth–Plass. Apostrophes, nonbreaking joins, acronyms and non-ASCII words keep conservative wrapping; unrecognized or over63-byte tokens use safe emergency wrapping. The approximately54KiB read-only pattern table stays in flash, with no SD access or heap allocation for matching. Both boards share the rule and retain original text/progress/bookmark offsets; reflow may change page counts. Vertical typography is unchanged.
+
 ## Features
 
+- Settings → Shelf style adds **Liquid glass bookshelf**: nine opaque covers, thin refractive rails and subtle ledges. Retains existing styles and each board's refresh policy; no extra settling refresh. Style selection persists across restart and settings backup.
 - Home, bookshelf, file manager and settings; EPUB/TXT reading and embedded images.
 - Imported TTF/OTF system and reading fonts, a128-entry catalogue, weight and antialiasing controls.
 - S31 warm/cool frontlight, fine low-brightness adjustment, vibration, AI-key shortcuts and BLE page turners.

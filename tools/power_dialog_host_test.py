@@ -4,18 +4,14 @@ SPDX-License-Identifier: Apache-2.0
 """
 from pathlib import Path
 import re, subprocess, sys, tempfile
+from home_cover_cache_host_test import function as source_function
 ROOT=Path(__file__).resolve().parents[1]
 power=(ROOT/'main/ui/ui_power_dialog.c').read_text()
 if len(sys.argv)>2 and sys.argv[1]=='--input-c':
     Path(sys.argv[2]).write_text(power[:power.index('EpdRect ui_power_dialog_rect(void)')].replace('#include "ui_glass.h"\n','').replace('#include "esp_heap_caps.h"\n',''))
     raise SystemExit(0)
 def function(path,name):
-    text=(ROOT/path).read_text()
-    m=re.search(r'^(?:static )?[^\n]+\b'+name+r'\([^;{}]*\)\s*\{',text,re.M)
-    assert m,name
-    at=m.end();depth=1
-    while depth:depth+=(text[at]=='{')-(text[at]=='}');at+=1
-    return text[m.start():at]+'\n'
+    return source_function(name,ROOT/path)+'\n'
 code=r'''
 #include <assert.h>
 #include <stdio.h>
@@ -25,6 +21,7 @@ code=r'''
 #include <limits.h>
 #include "ui_power_dialog.h"
 #include "ui_kit.h"
+#include "ui_image_dither.h"
 #define W 684
 #define H 1216
 static uint8_t fb[W*H/2],before[sizeof(fb)];

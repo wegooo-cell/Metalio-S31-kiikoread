@@ -28,11 +28,24 @@ void book_set_embedded_fonts(bool on);
 size_t book_chapter_count(void);
 /// 可见目录优先采用正文编号题头，仍映射到原始 spine 章节；进度继续使用 spine 索引。
 /// Prefer numbered body headings in the TOC while mapping back to original spine indices for progress.
+/// TXT目录按需读标题并定位到旧阅读分段内，保留已有进度/书签编号。/ TXT titles load on demand and target offsets inside legacy reading segments, preserving progress/bookmark IDs.
 size_t book_navigation_count(void);
 size_t book_navigation_chapter(size_t position);
 esp_err_t book_navigation_title(size_t position, char *buf, size_t cap);
 const char *book_navigation_anchor(size_t position);
 size_t book_navigation_source_offset(size_t position);
+/// TXT按当前正文UTF8位置选目录；EPUB保留其原映射流程。/ Select TXT navigation by current UTF8 position; EPUB retains its existing mapping.
+size_t book_navigation_position(size_t chapter,size_t text_offset);
+/// TXT卷范围使用原可见目录索引；没有可靠分卷时返回零，EPUB保留原目录。/ TXT volumes use original navigation indices; zero means flat, and EPUB keeps its own navigation.
+typedef struct {
+    size_t begin, end; ///< 半开章节范围 / Half-open navigation range
+    size_t title; ///< 原卷名索引或SIZE_MAX / Source volume-title index or SIZE_MAX
+    unsigned number; ///< 缺少卷名时的编号，零为卷首内容 / Fallback ordinal, zero for front matter
+} book_volume_t;
+size_t book_navigation_volume_count(void);
+bool book_navigation_volume(size_t index, book_volume_t *out);
+size_t book_navigation_volume_for(size_t position);
+esp_err_t book_navigation_volume_title(size_t index, char *buf, size_t cap);
 /// 复制 UTF-8 标题，空间不足返回错误。/ Copy a UTF-8 title, failing if capacity is insufficient.
 esp_err_t book_chapter_title(size_t i, char *buf, size_t cap);
 /// 加载 NUL 结尾的 PSRAM UTF-8；调用方 free。/ Load NUL-terminated PSRAM UTF-8; caller frees it.

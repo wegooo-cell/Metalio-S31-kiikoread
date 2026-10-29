@@ -85,6 +85,28 @@ const EpdWaveform* metalio_text_ripple_waveform(void) {
     return &s_waveform;
 }
 
+const EpdWaveform* metalio_text_ripple_clean_waveform(void) {
+    enum { EXTRA=6, HOLD=4, COUNT=METALIO_TEXT_RIPPLE_PHASES+EXTRA };
+    static uint8_t data[COUNT][16][4];
+    static const EpdWaveformPhases phases={COUNT,(const uint8_t*)data,NULL};
+    static const EpdWaveformPhases* ranges[]={&phases};
+    static const EpdWaveformMode mode={MODE_GL16,1,ranges};
+    static const EpdWaveformMode* modes[]={&mode};
+    static EpdWaveform wave;static bool ready;
+    const EpdWaveform* original=metalio_text_ripple_waveform();
+    if(!original)return NULL;
+    if(ready)return &wave;
+    const EpdWaveformPhases* source=e0470_waveform_phases(original,MODE_GL16);
+    if(!source||source->phases!=METALIO_TEXT_RIPPLE_PHASES)return NULL;
+    const int drive=source->phases-HOLD;
+    for(int f=drive;f<source->phases;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from)
+        if(e0470_phase_action(source,f,to,from))return NULL;
+    memcpy(data,source->luts,(size_t)drive*64);
+    for(int f=drive;f<drive+EXTRA;++f)memset(data[f][15],0xaa,4);
+    memcpy(data+drive+EXTRA,source->luts+(size_t)drive*64,HOLD*64);
+    wave=*original;wave.num_modes=1;wave.mode_data=modes;ready=true;return &wave;
+}
+
 bool display_reader_fast_ripple_enabled(void) { return metalio_text_ripple_waveform() != NULL; }
 
 bool metalio_text_ripple_prepare(EpdiyHighlevelState* hl, EpdRect area) {
@@ -132,6 +154,7 @@ void metalio_text_ripple_disable(void) { s_disabled = true; }
 #else
 bool display_reader_fast_ripple_enabled(void) { return false; }
 const EpdWaveform* metalio_text_ripple_waveform(void) { return NULL; }
+const EpdWaveform* metalio_text_ripple_clean_waveform(void) { return NULL; }
 bool metalio_text_ripple_prepare(EpdiyHighlevelState* hl, EpdRect area) { (void)hl; (void)area; return false; }
 void metalio_text_ripple_disable(void) {}
 #endif

@@ -14,3 +14,5 @@ bool display_main_switch_erase_set(bool);
 bool display_main_shelf_home_erase_set(bool);
 enum EpdDrawError update_display_gray_transition(EpdiyHighlevelState* hl,EpdRect area);
 #endif
+
+unsigned display_main_quality_set(unsigned);

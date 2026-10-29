@@ -52,6 +52,7 @@ jobs:
           python3 tools/metalio_lock_key_host_test.py
           python3 tools/metalio_lock_resume_host_test.py
           python3 tools/metalio_mount_resume_host_test.py
+          python3 tools/txt_utf16_host_test.py
           python3 tools/metalio_wake_media_recovery_host_test.py
           python3 tools/metalio_power_choice_host_test.py
           python3 tools/settings_layout_font_host_test.py
@@ -90,8 +91,6 @@ jobs:
           node tools/flasher_integrity_host_test.cjs
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
-          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
-          build/book-tests/layout
 
   build:
     runs-on: ubuntu-latest
@@ -143,7 +142,25 @@ jobs:
           python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/host/${{ matrix.board }}
           cd build/host/${{ matrix.board }}
           mkdir -p build/book-tests/settings-card
+          cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -Imain/book -Imain -Itools/book_layout_stubs -Itools/book_source_host_stubs tools/book_layout_host_test.c main/book/book_layout.c main/book/html_text.c -o build/book-tests/layout
+          build/book-tests/layout
+          python3 tools/gen_english_hyphen.py --check
+          python3 tools/english_hyphen_host_test.py
+          if [ "${{ matrix.board }}" = "metalio47" ]; then
+            python3 tools/metalio_du14_host_test.py
+            python3 tools/metalio_du14_white_host_test.py
+          fi
+          python3 tools/title_font_host_test.py
           python3 tools/file_names_host_test.py
+          python3 tools/txt_navigation_host_test.py
+          if [ "${{ matrix.board }}" = "metalio47" ]; then
+            python3 tools/txt_volume_host_test.py --s31
+          else
+            python3 tools/txt_volume_host_test.py
+          fi
+          python3 tools/test_book_toc.py
+          python3 tools/liquid_shelf_style_host_test.py
+          python3 tools/shelf_guard_cache_host_test.py
           python3 tools/reading_settings_host_test.py
           python3 tools/reader_controls_host_test.py
           python3 tools/reader_ui_scale_host_test.py

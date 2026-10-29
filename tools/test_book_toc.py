@@ -22,6 +22,12 @@ typedef int esp_err_t;
 #define ESP_OK 0
 esp_err_t book_navigation_title(size_t position, char *out, size_t cap);
 size_t book_navigation_chapter(size_t position);
+typedef struct {size_t begin,end,title;unsigned number;} book_volume_t;
+size_t book_navigation_volume_count(void);
+bool book_navigation_volume(size_t index,book_volume_t *out);
+size_t book_navigation_volume_for(size_t position);
+esp_err_t book_navigation_volume_title(size_t index,char *out,size_t cap);
+
 """,
     "ui_kit.h": """#pragma once
 #include <stdbool.h>
@@ -97,6 +103,10 @@ bool ui_rect_hit(EpdRect r,int x,int y){return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<
 void ui_hairline(uint8_t *fb,int y,int x,int width,uint8_t gray){(void)fb;(void)y;(void)x;(void)width;(void)gray;}
 void ui_nav_status(uint8_t *fb){(void)fb;}
 void ui_nav_back(uint8_t *fb,int x,int y){(void)fb;(void)x;(void)y;}
+size_t book_navigation_volume_count(void){return 0;}
+bool book_navigation_volume(size_t i,book_volume_t *v){(void)i;(void)v;return false;}
+size_t book_navigation_volume_for(size_t p){(void)p;return SIZE_MAX;}
+esp_err_t book_navigation_volume_title(size_t i,char *b,size_t n){(void)i;(void)b;(void)n;return -1;}
 esp_err_t book_navigation_title(size_t position,char *out,size_t cap){
     size_t index=book_navigation_chapter(position);
     if(seen_count<8)seen_sources[seen_count++]=index;
@@ -107,6 +117,7 @@ esp_err_t book_navigation_title(size_t position,char *out,size_t cap){
 size_t book_navigation_chapter(size_t position){return position+nav_shift;}
 int main(void){
     assert(book_toc_pages(0)==1 && book_toc_pages(7)==1 && book_toc_pages(8)==2);
+    int page=0;assert(!book_toc_picker_toggle(&page)&&!book_toc_picker_close(&page));
     assert(book_toc_hit(58,110,0,8)==BOOK_TOC_BACK);
     assert(book_toc_hit(100,270,0,8)==0);
     assert(book_toc_hit(100,270,1,8)==7);

@@ -316,6 +316,61 @@ S31正常待机后继续恢复TF上的字体与书籍句柄；临时读卡/内�
 
 S31 resumes pending SD font/book handles after normal standby. Transient I/O/OOM failures retry after1/3/10/30seconds; a successful manual load clears old rejection. Invalid faces still limit automatic retries, and abnormal-start protection retains built-in fonts without changing saved choices. The128-entry catalogue identifies actual paths, keeps UTF-8 labels valid and distinguishes duplicates. Only `.ttf`/`.otf` are listed; extensions do not guarantee support for every outline format. Only names exceeding persisted-path capacity are shortened with a hash, retaining font bytes and avoiding existing files. Font uploads normalize FAT-incompatible symbols; other upload path checks remain unchanged.
 
+### S31 DU14 local experiment / S31十四相本地实验
+
+`tools/build_firmware.py --board metalio47 --s31-du14` opts into the user-supplied manufacturer DU14 table; it is OFF by default and rejected for Pico. The original header is preserved at `boards/metalio47/src/components/e0470_epaper_waveform/my_waveform_du14.h` (SHA256 `cac0efbcb2801114b36a4bee5eaa9c453dcd7d098210ef2739f853e86a0c39f4`). No redistribution license has been inferred from its delivery. Package metadata explicitly records `experimental_du14`.
+
+仅替换速读黑白、主页黑白及黑白页刷访问器，复用原扫描时序和脏区。14相原表不加前清屏或额外相位；黑到黑末4相补黑、白到白保持。底栏灰阶组合显式取原20相；普通阅读、图片/封面、GL37/48、4灰面板、8相跟手和手动/周期/故障全刷不改变。灰阶目标不得直接用DU14替代。实际黑度、残影、温度及速度需要实屏比较。
+Only fast binary reading and binary main/page accessors switch, using existing scan timing/dirty regions. DU14 receives no preclear or added phases; it reinforces black-to-black in the last4 phases and holds white-to-white. Gray footer synthesis explicitly retains reference DU20. Ordinary reading, images/covers, GL37/48, four-gray panels, eight-phase tracking and manual/periodic/fault cleanup remain unchanged. Do not substitute DU14 for grayscale targets; optical density, ghosting, temperature and latency require panel comparison.
+
+Run `python3 tools/metalio_du14_host_test.py` in the S31 source/test view to verify raw transitions, accessor isolation and byte-identical unaffected profiles. This is a local experiment, with no firmware version bump or publication implied.
+
+DU14 white maintenance: homepage Fast mode uses a derived14-phase profile only during real root-tab switches; the Fast BW reader shares its LUT through a GL16 mode alias. The last3 existing phases drive white-to-white toward white, and all other equal pairs hold. Changed transitions keep the supplied sequence; no raw tables, timing or total phase count change. Root maintenance covers unchanged rows/columns in one existing content-area batch, cropped above navigation icons. Same-page/child/ordinary/water/cleanup paths remain unchanged. The derived table costs896 bytes once, with no per-switch allocation; panel optics still need testing.
+十四相白底维护仅用于首页快刷真实切页及速读黑白正文；末三相补推等白，其他等值保持，变化像素保留厂家序列；一轮内容区输出覆盖未变行列，保护底栏图标，仍14相。不增加每次切换分配。新增验证：`python3 tools/metalio_du14_white_host_test.py`。
+
+## TXT分卷目录 / TXT volume navigation
+
+两机共用TXT分卷识别和目录呈现。明确的卷/部/册及英文Part标题优先；没有卷名时，前章号至少5、当前回到1并在后续最多8个导航项内连续确认2/3，才推断新卷，不能按章号去重或排序。总结/感言/卷终保留为上一卷内容，缺少可信卷名显示自动编号。目录只展开一卷，进入时展开并定位当前章节；点击卷名仅展开/折叠，正文跳转仍使用原目录项与文件偏移。EPUB沿用自身目录，不从其正文推断TXT卷。
+
+最多256组，仅实际分卷时分配2KiB定位元数据；已有最多16384项/128KiB章节定位页和八条按需标题缓存不变。卷表超限或分配失败回退完整平铺目录，不缓存不完整结果。TXT缓存版本5校验卷范围、数量及校验和，更新时可自动重建缓存，不改旧2048阅读分段、进度/书签编号或TXT文件。首次扫描耗时仍受文件/SD影响。
+
+English: Both boards share TXT grouping and its single-open-volume directory. Prefer explicit volume/part headings. Infer a missing boundary only after a previous ordinal of at least5, a reset to1 and confirmed2/3 within eight following navigation items. Keep notes with the old volume and retain original order/positions. EPUB retains its own navigation. Allocate at most2KiB for256groups only when needed; retain existing paged chapter locations and lazy titles. On OOM/cap exhaustion show the flat directory and avoid incomplete caches. Cachev5 validates ranges/count/checksum and rebuilds without changing legacy progress/bookmarks or source files.
+
+分卷目录底部“选择卷”进入仅显示卷名的一级目录，使用原分页/滑动，每页最多7卷；选择后展开对应卷并定位卷行，不直接加载正文。“返回章节”及返回键取消选择并恢复原目录页。再次进入目录恢复按当前阅读位置定位。选择器仅保留开关和返回页，无额外章节/标题数组，未分卷书不显示该入口。
+
+English: The bottom volume button opens a root-only list using the existing seven-row paging/swipes. Choosing a volume expands and locates its header without loading text. Cancel/back restores the old directory page; normal entry still locates the reading position. The picker stores only a flag/return page, with no extra chapter/title arrays; flat books hide it.
+
+
+### S31 主页面切换加强擦白 / Stronger S31 root-switch erasure
+
+显式本地参数 `--s31-main-clean` 启用，默认关闭，Pico 单板构建拒绝此参数。清单记录 `experimental_main_clean`。只在首页、书架、文件管理、设置之间真正换页且画面改变时生效；同页控件、阅读正文、图片浏览、面板/菜单、锁屏、手动/周期/故障全刷保留原出口。
+
+切换来源或目标为书架时增加八相变白，其余根页之间增加六相；追加两相全保持释放。保留S31原派生表的完整序列、灰阶、等值维护及DU14等白三相，不移植Pico波形。书架→首页原下半区加强先组合再派生；六/八相缓存按力度区分，已派生输入回到原源表，不重复叠加。底栏范围、横条同轮输出和水波纹方向保留，不增加前清屏或第二轮补刷。
+
+DU14根页维护分别为22/24相；完整灰阶的既有50相根页分别为58/60相，书架→首页下半区最多62相；GL37书封的既有39相变为47/49相。均在本机64相引擎上限内。相较原“四相变白、两相释放”再增加2/4次扫描；总延迟和残影需实屏比较。阅读速读、普通/图文及水波纹保持原各自方案。
+
+根页最多24份、每份不超过62×64字节，合计最多95232字节PSRAM及少量元数据；不新增整帧或逐次分配。缓存满、分配失败或源不兼容时保留原表，不缓存失败。原厂表、电压、时钟和供电顺序不变。
+
+设置/蓝牙列表的边框、分隔线和图标改明确黑白，文字抗锯齿和头像保留灰阶。列表滚动独立采用本机完整48相灰阶加八相变白、两相释放，共58相；只刷新列表范围，题头/底栏不参与，松手和空闲不追加补刷。独立缓存一份3712字节PSRAM，失败回退本机原灰阶；增加扫描用于清残影，会比原DU列表慢。`grayscale_ui`是S31的只读当前子视图查询，避免列表或预览被系统二值化；进页不叠加列表尾段，根页补白仍由六/八相许可负责，手动/故障全刷优先。系统灰阶水波纹使用主页表，不进入阅读文字量化。
+
+English: Explicit local S31 root scope chooses eight changed-white phases when either side is the shelf, six otherwise, then two release holds. Preserve all native actions, existing equal-white maintenance, lower-body reinforcement, navigation crops and ripple direction. Strength-keyed caches rebase derived inputs instead of stacking. DU14 totals22/24, full-gray roots58/60 and shelf-to-home lower62, within the native64-phase cap. Compared with the earlier four-white/two-release profile this adds two/four scans; optics/latency still need panel acceptance. Bound24 root LUTs to95232B external memory, retaining safe fallback without changing native tables, timing or power. Settings/BLE decoration is BW while glyph/avatar grays remain. Scrolling independently uses native48 plus eight changed-white/two release phases (58) in one cropped output, with no release/idle pass. Its single3712B external LUT retries after OOM. The S31-only pure `grayscale_ui` query admits gray list/preview rendering; entry retains root scope without stacking list tails, and full/fault recovery wins. Gray system ripple uses main LUTs outside reader quantization. Reading modes remain independent.
+
+### 未配置时的外观默认值 / Unconfigured appearance defaults
+
+两机共用产品默认：液态玻璃书架（样式6）、Moon Clock（组件4）、首页强刷开启。只有缺失或无效设置才使用默认；保留已保存的有效样式/组件，以及明确关闭首页强刷的选择。旧书架迁移标记仅补齐记录，不再强制把已保存的样式改为亚克力；已删除的3/4样式仍按既有规则回退2。刷机保留数据时不会清除已有选择；旧配置备份恢复继续按其记录执行。
+
+English: Both boards default to liquid-glass shelf6, Moon Clock4 and Home full refresh ON only when unconfigured/invalid. Preserve valid saved choices and explicit OFF, including across retained-data flashing and backup restore. The legacy shelf marker no longer overwrites valid styles; retired3/4 still map to2.
+
+### Pico 主页面擦白实验 / Pico root-whitening experiment
+
+`--pico-main-clean` 单独启用，默认OFF，S31单板命令拒绝；与S31的`--s31-main-clean`分开配置。两机清单均记录各自的`experimental_main_clean`。只在四个可见根页之间真正切换时选择，首次进入、同页更新、阅读/子页/菜单/锁屏、首页强刷和手动/周期/失败全刷保留原出口。
+
+Pico派生其本机DU20/书架出口24/GL37：切换来源或目标是书架时补八相，其余根页之间补六相。保留原非等值动作，将补白插在原末尾保持之前；没有末尾保持的源再补一相释放。灰阶目标不量化，等值像素全部保持。GL37分别合43/45相，DU20合26/28相；书架退出原24相加8相及1保持为33相。书架内翻页、列表滚动和正文保留各自出口，不继承根页切换许可。
+
+条带引擎上限45相，8带紧凑切换分别50/52拍；阅读水波纹仍41相。扫描节拍、电压/供电、底栏裁剪和方向不变，不采用S31数据。普通/水波纹根页合并底部指示条，快刷灰阶带保留；补白在同轮输出，无新增全刷轮次。六个源表各缓存六/八两种力度，最多12×45×64=34560字节PSRAM加元数据，条带展开缓存最多45KiB；不新增整帧。OOM、缓存满或不兼容源回退原表，重复调用及力度切换都不叠加相数。设置列表独立45相（补八相），首页强刷和手动/周期/故障全刷优先，光学改善与实际延迟仍需实屏比较。
+
+English: Explicit local `--pico-main-clean` remains OFF by default and scoped to changed visible root tabs. Either source or destination being the shelf selects eight changed-white phases; other root pairs select six. Retain native changed-pixel actions and settling, hold all equal pairs, and add one release only when a source has no settling. GL37 totals43/45, DU20 totals26/28, and the24-phase shelf exit totals33 with eight drives and one release. Shelf pagination, list scrolling and reading retain independent outlets. The band cap is45 (50/52 compact ticks over eight bands); reader ripple remains41. Preserve timing, voltage/power, navigation and direction; never import S31 LUTs. Two strengths per six sources use at most34560B external LUT data plus metadata, and the band expansion uses at most45KiB; no extra frame or clear pass. Cache keys include strength, derived inputs rebase instead of stacking, and OOM/capacity/incompatibility retain the source. Settings lists keep their own45-phase profile and full/manual/periodic/fault outputs retain priority. Hardware acceptance is still required.
+
 ## S31阅读差分更新（2026-10-29） / S31 reader differences
 
 本次S31产品构建显式启用`--s31-reader-panel37`，CI同样覆盖该档。普通文字、图文及离图页原样采用Moku PR6的GL37加六相目标白，共43相、16级灰阶；六相包含原本已白的区域，黑/灰等值不重驱。水波纹继续原独立出口；手动及周期清理保留GC48。GL37关闭或分配失败时，完整GL48保留全部非等值迁移，追加六相目标白和三相保持，共57相，避免回到重驱等黑/灰的原表。

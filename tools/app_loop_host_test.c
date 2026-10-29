@@ -75,6 +75,8 @@ static bool navigation_blocked(app_ctx_t*ctx){(void)ctx;return false;}
 static int persistent_ripple_height;
 static int edge_returns,back_ripples,power_header_draws,power_change_step=-1;
 static bool system_fast_scope;
+static unsigned root_quality_scope;
+unsigned display_main_quality_set(unsigned phases){unsigned old=root_quality_scope;root_quality_scope=phases;return old;}
 bool display_system_fast_set(bool enabled){bool old=system_fast_scope;system_fast_scope=enabled;return old;}
 enum EpdDrawError update_display_main_turn(EpdiyHighlevelState *hl,EpdRect area,int dir){return update_display_water_turn(hl,area,dir);}
 static bool power_reported;

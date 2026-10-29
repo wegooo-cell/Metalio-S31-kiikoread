@@ -148,6 +148,10 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     return pin_paint(ctx, (EpdRect){122, 218, 440, 247});
 }
 static int s_style_scroll, s_main_scroll;
+// 新样式使用新编号；旧3/4仍退回亚克力，列表保持5。
+// New style gets a new ID; retired3/4 still fall back to acrylic and list remains5.
+static const uint8_t s_shelf_style_ids[] = {1, 2, 6, 5};
+#define SHELF_STYLE_CHOICES 4
 static bool s_collage_prepare_pending;
 static bool s_scroll_drag_consumed, s_scroll_present_pending;
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
@@ -337,7 +341,7 @@ static int settings_main_row_height(void) {
 // Setting row icons: a 32 px box centred in the 68 px row with one shared ink level.
 #define SETTINGS_UNLOCK_ICON 18
 #define SETTINGS_ICON_PX 32
-#define SETTINGS_ICON_INK 0x58
+#define SETTINGS_ICON_INK UI_GRAY_BLACK
 // 主页面滚动上限：把最后一组的最后一行刚好推到导航栏之上，多留 8px 余量。
 // Main-page scroll limit: just enough to bring the last row of the last group above the nav bar,
 // with 8 px to spare.
@@ -546,12 +550,22 @@ static bool time_save(void) {
     return true;
 }
 
+static bool settings_plain_list(void) {
+    return s_page==SETTINGS_MAIN||s_page==SETTINGS_BLUETOOTH||s_page==SETTINGS_BLE_SCAN;
+}
 static void settings_card(uint8_t *fb, EpdRect rect, int radius, uint8_t fill, uint8_t edge) {
-    ui_fill_round_rect(fb, rect, radius, fill);
-    ui_draw_control_frame(fb, rect, radius, edge);
+    // Limit binary treatment to decoration; glyph AA, avatar pixels and previews are untouched.
+    if(settings_plain_list()) {
+        ui_fill_round_rect(fb,rect,radius,fill<128?UI_GRAY_BLACK:UI_GRAY_WHITE);
+        ui_draw_round_rect(fb,rect,radius,UI_GRAY_BLACK);
+    } else {
+        ui_fill_round_rect(fb, rect, radius, fill);
+        ui_draw_control_frame(fb, rect, radius, edge);
+    }
 }
 static void settings_divider(uint8_t *fb, int y, int x, int width) {
-    ui_draw_separator(fb, y, x, width, 0x60);
+    if(settings_plain_list())ui_hairline(fb,y,x,width,UI_GRAY_BLACK);
+    else ui_draw_separator(fb, y, x, width, 0x60);
 }
 static void settings_value(uint8_t *fb,int x,int cy,int px,const char *value) {
     char shown[128]; snprintf(shown,sizeof(shown),"%s",value);
@@ -857,7 +871,8 @@ static void draw_style_thumbnail(uint8_t *fb, int style, int top) {
         ui_hairline(fb, top + 143, left, 486, 0x80);
     } else if (style == 2) {
         ui_draw_acrylic_guard(fb, (EpdRect){left, top + 94, 486, 70});
-
+    } else if (style == 6) {
+        ui_draw_liquid_shelf_rail(fb, (EpdRect){left, top + 126, 486, 36});
     }
 }
 
@@ -945,27 +960,29 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
-        ui_nav_back(fb, 36, 79);
-        ui_text_vc(fb, 342, 107, 34, "书架样式", EPD_DRAW_ALIGN_CENTER, false);
-        ui_text(fb, 36, 207, 23, "选择书架外观与排列方式", EPD_DRAW_ALIGN_LEFT, false);
-        static const char *const styles[] = {"深色书轨", "亚克力书架", "列表书架"};
-        static const char *const descriptions[] = {"每页 9 本", "每页 9 本", "作者与进度 · 每页 4 本"};
-        for (int i = 0; i < 3; ++i) {
+        static const char *const styles[] = {"深色书轨", "亚克力书架", "液态玻璃书架", "列表书架"};
+        static const char *const descriptions[] = {"每页 9 本", "每页 9 本", "薄玻璃挡条 · 每页 9 本", "作者与进度 · 每页 4 本"};
+        for (int i = 0; i < SHELF_STYLE_CHOICES; ++i) {
             int y = 263 + i * 253 - s_style_scroll;
             if (y + 230 < 242 || y >= settings_viewport_end()) continue;
             EpdRect card = {36, y, 612, 230};
-            int style = i == 2 ? 5 : i + 1;
+            int style = s_shelf_style_ids[i];
             bool active = app_settings_shelf_style() == style;
             settings_card(fb, card, 24, active ? 0xd0 : UI_GRAY_WHITE,
                           active ? 0x58 : 0x70);
             draw_style_thumbnail(fb, style, y + 11);
-            if (y + 190 < settings_viewport_end()) ui_text(fb, 68, y + 188, 23, styles[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (y + 195 < settings_viewport_end()) ui_text(fb, 310, y + 192, 17, descriptions[i], EPD_DRAW_ALIGN_LEFT, false);
-            if (y + 220 < settings_viewport_end()) {
+            if (y + 188 >= 242 && y + 222 < settings_viewport_end()) ui_text_box(fb, (EpdRect){68,y+180,230,42}, 23, styles[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (y + 192 >= 242 && y + 220 < settings_viewport_end()) ui_text_box(fb, (EpdRect){310,y+184,272,36}, 17, descriptions[i], EPD_DRAW_ALIGN_LEFT, false);
+            if (y + 194 >= 242 && y + 220 < settings_viewport_end()) {
                 epd_draw_circle(609, y + 207, 13, UI_GRAY_BLACK, fb);
                 if (active) epd_fill_circle(609, y + 207, 6, UI_GRAY_BLACK, fb);
             }
         }
+        ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,242},UI_GRAY_WHITE,fb);
+        ui_fill_rect_fast((EpdRect){0,settings_viewport_end(),UI_LOCK_WIDTH,UI_LOCK_HEIGHT-settings_viewport_end()},UI_GRAY_WHITE,fb);
+        ui_nav_status(fb);ui_nav_back(fb,36,79);
+        ui_text_vc(fb,342,107,34,"书架样式",EPD_DRAW_ALIGN_CENTER,false);
+        ui_text(fb,36,207,23,"选择书架外观与排列方式",EPD_DRAW_ALIGN_LEFT,false);
         settings_navigation(fb);
         return;
     }
@@ -1441,7 +1458,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
                   display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
     const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
     const int personal_icons[]={4,5,16,10};
@@ -1895,10 +1912,13 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if(s_page==SETTINGS_FACTORY_RESET)return reset_gesture(ctx,ev);
     if (s_page == SETTINGS_TEXT_EDIT) return profile_editor_gesture(ctx, ev);
-    if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN) {
+    if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN || s_page == SETTINGS_SHELF_STYLE) {
         int limit = SETTINGS_SCROLL_MAX;
         int *offset = &s_main_scroll;
-        if (s_page != SETTINGS_MAIN) {
+        if (s_page == SETTINGS_SHELF_STYLE) {
+            limit=263+SHELF_STYLE_CHOICES*253-23-settings_viewport_end()+12;
+            offset=&s_style_scroll;
+        } else if (s_page != SETTINGS_MAIN) {
             int bottom = s_page == SETTINGS_BLUETOOTH ? ble_layout().content_bottom + s_ble_scroll : ble_scan_layout().content_bottom;
             limit = bottom - settings_content_end() + 12;
             offset = &s_ble_scroll;
@@ -2005,9 +2025,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (s_page == SETTINGS_SHELF_STYLE) {
         if (y < 190) { s_page = SETTINGS_MAIN; (void)read_pico_transfer_get_saved_wifi(s_main_wifi,&s_main_wifi_saved); settings_prepare_profile(); return APP_REDRAW_PAGE; }
-        for (int i = 0; i < 3; ++i) {
-            if (y >= 263 + i * 253 - s_style_scroll && y < 493 + i * 253 - s_style_scroll && y < settings_viewport_end()) {
-                app_settings_set_shelf_style((uint8_t)(i == 2 ? 5 : i + 1));
+        for (int i = 0; i < SHELF_STYLE_CHOICES; ++i) {
+            if (y >= 242 && y >= 263 + i * 253 - s_style_scroll && y < 493 + i * 253 - s_style_scroll && y < settings_viewport_end() && ev->x0 >= 36 && ev->x0 < 648) {
+                app_settings_set_shelf_style(s_shelf_style_ids[i]);
                 s_page = SETTINGS_MAIN;
                 return APP_REDRAW_PAGE;
             }
@@ -2443,8 +2463,8 @@ static bool settings_present(app_ctx_t *ctx, app_redraw_t redraw) {
         EpdRect area = {0, top, UI_LOCK_WIDTH, settings_content_end() - top};
         // 只驱动变化像素，滚动次数不触发黑白清屏；题头与底栏保持稳定。
         // Drive changed pixels only; scroll counts never trigger a wipe, and header/nav stay stable.
-        // 滚动已限定列表区域；取消主页替换许可，保留抗锯齿并去掉额外补白，不在松手后追加刷新。
-        // Scroll already targets only the list: cancel main-profile substitution, retain AA and omit extra whitening, without a release refresh.
+        // 列表滚动采用45相有力擦白：保留原驱动并增加八相变白，末尾三相保持；文字/头像灰阶不变。
+        // List scrolling keeps native drives plus eight changed-white phases and three settle holds; glyph/avatar grays remain unchanged.
         display_main_transition_cancel();
         const EpdWaveform *wave=display_settings_scroll_waveform();
         guard_draw_result(ctx->hl, update_display_area_diff_with(ctx->hl,wave,MODE_GL16,area));

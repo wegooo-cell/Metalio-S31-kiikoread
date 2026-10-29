@@ -45,6 +45,9 @@ extern "C" {
 extern const EpdWaveform E0470_FULL_WAVEFORM;
 
 #if KIIKO_BOARD_METALIO47
+/// 本地S31实验的原始14相DU；未启用时返回NULL，不修改参考表。/ Raw local S31 DU14; NULL when disabled, without modifying reference tables.
+const EpdWaveform* e0470_du14_waveform(void);
+
 /// 旧 API 兼容名；S31 本地版沿用参考表，不启用 Pico 的 8 灰阶表。
 /// Legacy compatibility name: S31 uses the reference tables without Pico 8-gray calibration.
 #define E0470_GRAY8_GC16_FRAMES 48

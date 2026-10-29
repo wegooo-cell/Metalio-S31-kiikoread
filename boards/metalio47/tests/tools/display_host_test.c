@@ -50,6 +50,7 @@ static const EpdWaveform soft_gray = {4};
 static const EpdWaveform reader_soft = {5};
 static const EpdWaveform quiet_nav = {6};
 const EpdWaveform* display_main_navigation_waveform(void){return &quiet_nav;}
+const EpdWaveform* display_reader_soft_turn_waveform(void){return &reader_soft;}
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
 static enum EpdDrawError draw(EpdiyHighlevelState*,enum EpdDrawMode,int,bool);
 static int panel_entry_batches;
@@ -65,6 +66,9 @@ const EpdWaveform* display_main_normal_waveform(void) { return display_main_wate
 const EpdWaveform* display_main_page_gray_waveform(void){return display_main_normal_waveform();}
 const EpdWaveform* display_main_shelf_soft_waveform(void){return &soft_gray;}
 const EpdWaveform* display_main_shelf37_waveform(bool art){(void)art;return NULL;}
+const EpdWaveform* display_du14_white_waveform(void){return NULL;}
+const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){(void)mode;assert(white==0||white==6||white==8);return wave;}
+const EpdWaveform* display_main_background_waveform_with_phases(const EpdWaveform* wave,enum EpdDrawMode mode,unsigned white){return display_main_clean_waveform_with_phases(wave,mode,white);}
 const EpdWaveform* display_main_switch_waveform(const EpdWaveform *wave,enum EpdDrawMode mode){(void)mode;return wave;}
 const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode){(void)mode;return &E0470_WAVEFORM;}
 const EpdWaveform* display_main_bw_waveform(void) {return &E0470_WAVEFORM;}

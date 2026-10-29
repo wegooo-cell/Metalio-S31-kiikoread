@@ -85,6 +85,11 @@ settings = (root / "main/apps/app_device_settings.c").read_text()
 first = settings.index("if (s_page == SETTINGS_MAIN_REFRESH) {")
 last = settings.index("if (s_page == SETTINGS_SYSTEM_CONTRAST) {", first)
 labels += re.findall(r'"([^"\n]*)"', settings[first:last])
+# 样式选择的标签/说明不能因新增玻璃样式而整行回退字体。
+# New shelf labels/descriptions must not force the whole line to another face.
+first=settings.index("if (s_page == SETTINGS_SHELF_STYLE) {",settings.index("static void render_content("))
+last=settings.index("if (s_page == SETTINGS_TIME_EDIT) {",first)
+labels += re.findall(r'"([^"\n]*)"',settings[first:last])
 # 共用键盘必须始终使用系统字形；退格图案由线段绘制。
 # Shared keys must always use system glyphs; backspace is drawn with lines.
 keyboard=(root/'main/ui/ui_keyboard.c').read_text()

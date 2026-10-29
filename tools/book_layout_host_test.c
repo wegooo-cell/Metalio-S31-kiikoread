@@ -154,6 +154,175 @@ int ttf_vertical_text_height_px(int px, const char* text, int tracking_px) {
     }
     return total;
 }
+
+// 验证仅显示连字符新增，原字母顺序与数量不变；用于本身不含连字符的夹具。
+// Verify display-only hyphens preserve every source letter in fixtures without source hyphens.
+static void assert_wrap_content(const char *source) {
+    const char *out = drawn;
+    while (*out) {
+        if (*out != '-') { assert(*source == *out); ++source; }
+        ++out;
+    }
+    assert(!*source);
+}
+
+static void english_wrap_tests(uint8_t *fb) {
+    book_layout_set_vertical(false); book_layout_set_spacing(150, 0);
+    book_layout_set_typography(0); book_layout_set_first_line_indent(0);
+    book_layout_set_chapter_lead(0, 0); book_layout_set_runs(NULL, 0);
+    book_layout_set_image_dims(NULL, NULL);
+    const struct {
+        const char *source;
+        int width;
+        unsigned count;
+        const char *lines[4];
+    } cases[] = {
+        {"One two three", 80, 2, {"One two", "three"}},
+        {"abc defgh", 50, 2, {"abc", "defgh"}},
+        {"don't stop", 60, 2, {"don't", "stop"}},
+        {"we’re ready", 70, 2, {"we’re", "ready"}},
+        {"well-known", 70, 2, {"well-", "known"}},
+        {"hello-world", 50, 2, {"hello-", "world"}},
+        {"abcdefghmnop", 50, 3, {"abcde", "fghmn", "op"}},
+        {"abcde", 50, 1, {"abcde"}},
+        {"甲乙hello世界", 60, 3, {"甲乙", "hello世", "界"}},
+        {"read (great) books", 100, 3, {"read", "(great)", "books"}},
+        {"abc   def", 50, 2, {"abc", "def"}},
+        {"abc\tdef", 50, 2, {"abc", "def"}},
+        {"abc a book", 80, 2, {"abc", "a book"}},
+        {"abc re‑read", 80, 2, {"abc", "re‑read"}},
+        {"abéfgh", 50, 2, {"abéf", "gh"}},
+        {"été monde", 60, 2, {"été", "monde"}},
+        {"abc\r\ndef", 50, 2, {"abc", "def"}},
+        {"we read extraordinary stories", 160, 2, {"we read extraor-", "dinary stories"}},
+        {"abc reader", 90, 2, {"abc", "reader"}},
+        {"abcdefghij klmnop", 120, 2, {"abcdefghij", "klmnop"}},
+        {"abcdef extraordinary", 100, 3, {"abcdef ex-", "traordi-", "nary"}},
+        {"red red red", 105, 1, {"red red red"}},
+        {"abc reader's", 90, 2, {"abc", "reader's"}},
+        {"abc résumé", 90, 2, {"abc", "résumé"}},
+        {"abc abćdef", 90, 2, {"abc", "abćdef"}},
+    };
+    for (size_t c = 0; c < sizeof(cases) / sizeof(cases[0]); ++c) {
+        EpdRect box = {0, 0, cases[c].width, 30};
+        assert(book_layout_build(cases[c].source, strlen(cases[c].source), box, 10));
+        capture_lines = true; captured_count = 0; drawn[0] = 0;
+        for (size_t p = 0; p < book_layout_page_count(); ++p) book_layout_draw_page(fb, p, box, 10);
+        assert(captured_count == cases[c].count);
+        for (unsigned l = 0; l < captured_count; ++l) {
+            if (strcmp(captured[l], cases[c].lines[l]))
+                fprintf(stderr,"wrap case %zu row %u: [%s], expected [%s]\n",c,l,captured[l],cases[c].lines[l]);
+            assert(!strcmp(captured[l], cases[c].lines[l]));
+        }
+        // 分步预绘必须使用相同断点；页首仍指向原文，连字符不占原文字节。
+        // Idle rendering must use the same breaks; source page offsets never count synthetic hyphens.
+        unsigned at = 0;
+        for (size_t p = 0; p < book_layout_page_count(); ++p) {
+            book_layout_draw_cursor_t cursor = {0}; int result;
+            captured_count = 0; drawn[0] = 0;
+            do { result = book_layout_draw_slice(fb, p, box, 10, &cursor); assert(result >= 0); } while (!result);
+            for (unsigned l = 0; l < captured_count; ++l) assert(!strcmp(captured[l], cases[c].lines[at++]));
+            size_t off = book_layout_page_start_offset(p);
+            assert(off < strlen(cases[c].source) && book_layout_page_for_offset(off) == p);
+        }
+        assert(at == cases[c].count);
+    }
+    const char *long_word = "abcdefgh";
+    blk_t block = {.offset=0, .len=8, .image=-1, .run_first=0, .run_count=2};
+    html_run_t runs[] = {{0,4,1},{4,4,2}};
+    test_slot_ready_mask = 7; test_slot_advance[2] = 5;
+    book_layout_set_runs(runs, 2);
+    EpdRect box = {0,0,50,15};
+    assert(book_layout_build_blocks(long_word, 8, &block, 1, box, 10));
+    assert(book_layout_page_count() == 3 && book_layout_page_start_offset(1) == 4 &&
+           book_layout_page_start_offset(2) == 7);
+    captured_count=0; drawn[0]=0;
+    for(size_t p=0;p<3;++p) book_layout_draw_page(fb,p,box,10);
+    assert(captured_count==3 && !strcmp(captured[0],"abcd") && !strcmp(captured[1],"efg") && !strcmp(captured[2],"h"));
+    assert_wrap_content(long_word);
+    const char *span_words="abc defgh";
+    block=(blk_t){.offset=0,.len=9,.image=-1,.run_first=0,.run_count=2};
+    runs[0]=(html_run_t){0,6,1};runs[1]=(html_run_t){6,3,2};
+    assert(book_layout_build_blocks(span_words,9,&block,1,(EpdRect){0,0,80,30},10));
+    captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,(EpdRect){0,0,80,30},10);
+    assert(captured_count==2&&!strcmp(captured[0],"abc de-")&&!strcmp(captured[1],"fgh"));
+    book_layout_set_runs(NULL,0); test_slot_ready_mask=1; test_slot_advance[2]=0;
+    const char *title="One two three";
+    block=(blk_t){.offset=0,.len=13,.heading=true,.image=-1};
+    assert(book_layout_build_blocks(title,13,&block,1,(EpdRect){0,0,100,27},10));
+    assert(book_layout_page_count()==3&&book_layout_page_start_offset(1)==4&&book_layout_page_start_offset(2)==8);
+    captured_count=0;drawn[0]=0;
+    for(size_t p=0;p<3;++p)book_layout_draw_page(fb,p,(EpdRect){0,0,100,27},10);
+    assert(captured_count==3&&!strcmp(captured[0],"One")&&!strcmp(captured[1],"two")&&!strcmp(captured[2],"three"));
+    block.heading=false;block.align=1;
+    assert(book_layout_build_blocks(title,13,&block,1,(EpdRect){0,0,80,30},10));
+    captured_count=0;drawn[0]=0;book_layout_draw_page(fb,0,(EpdRect){0,0,80,30},10);
+    assert(captured_count==2&&first_draw_x==5&&last_draw_x==15);
+    const char *prose="One great reader can't forget café books and letters 甲乙 hello 世界 another word";
+    for(int width=30;width<=160;width+=10)for(int tracking=-2;tracking<=3;++tracking)for(unsigned indent=0;indent<=2;indent+=2){
+        book_layout_set_typography(tracking);book_layout_set_first_line_indent(indent);
+        EpdRect row={0,0,width,15};
+        assert(book_layout_build(prose,strlen(prose),row,10));
+        size_t consumed=0;
+        for(size_t p=0;p<book_layout_page_count();++p){
+            assert(book_layout_page_start_offset(p)==consumed);
+            captured_count=0;drawn[0]=0;book_layout_draw_page(fb,p,row,10);
+            assert(captured_count==1);
+            for(const char *out=drawn;*out;++out)if(*out!='-'){assert(*out==prose[consumed]);++consumed;}
+            while(prose[consumed]==' ')++consumed;
+            assert(book_layout_page_start_offset(p+1)==consumed);
+        }
+        assert(consumed==strlen(prose));
+    }
+    // 原词跨多页断开后仍只能使用完整原词的TeX断点，不对后缀重新猜词。
+    // Across page breaks use only the original whole word's TeX cuts, never reclassify a suffix.
+    const char *pattern_prose="extraordinary representation international";
+    const size_t word_at[]={0,14,29};
+    const unsigned legal[]={ (1u<<2)|(1u<<5)|(1u<<7)|(1u<<9),
+        (1u<<3)|(1u<<5)|(1u<<8)|(1u<<10), (1u<<2)|(1u<<5)|(1u<<7) };
+    unsigned observed_cuts=0;
+    for(int w=40;w<=180;w+=10)for(int tracking=-1;tracking<=1;++tracking) {
+        book_layout_set_typography(tracking);book_layout_set_first_line_indent(0);
+        EpdRect row={0,0,w,15};
+        assert(book_layout_build(pattern_prose,strlen(pattern_prose),row,10));
+        size_t consumed=0;unsigned emitted=0;
+        for(size_t p=0;p<book_layout_page_count();++p) {
+            drawn[0]=0;captured_count=0;book_layout_draw_page(fb,p,row,10);
+            for(const char *out=drawn;*out;++out) {
+                if(*out=='-') {
+                    unsigned word=consumed<14?0:consumed<29?1:2;
+                    size_t cut=consumed-word_at[word];
+                    assert(cut<32&&(legal[word]&(1u<<cut)));++emitted;
+                } else {assert(*out==pattern_prose[consumed]);++consumed;}
+            }
+            while(pattern_prose[consumed]==' ')++consumed;
+            assert(book_layout_page_start_offset(p+1)==consumed);
+        }
+        assert(consumed==strlen(pattern_prose));observed_cuts+=emitted;
+    }
+    assert(observed_cuts>10);
+    book_layout_set_typography(0);book_layout_set_first_line_indent(0);
+    capture_lines=false;
+    // 极窄行容不下连字符时仍前进；连续超长词测量量为线性，内存只随行增长。
+    // Extremely narrow rows still advance; long tokens keep linear measurement and line-sized scratch memory.
+    assert(book_layout_build("abcdef",6,(EpdRect){0,0,10,15},10));
+    assert(book_layout_page_count()==6); drawn[0]=0;
+    for(size_t p=0;p<6;++p)book_layout_draw_page(fb,p,(EpdRect){0,0,10,15},10);
+    assert(!strcmp(drawn,"abcdef"));
+    char *large = malloc(120001); assert(large); memset(large,'a',120000); large[120000]=0;
+    measured_codepoints=measure_calls=0; test_heap_largest=0;
+    assert(book_layout_build(large,120000,(EpdRect){0,0,600,1000},10));
+    assert(measured_codepoints < 120000*3 && test_heap_largest < 16384);
+    book_layout_free(); free(large);
+    // 有界探查也覆盖“短词后接超长词”，不能逐行重扫整个后缀。
+    // Bound lookahead when a short word precedes an enormous token, without rescanning its whole suffix per row.
+    large = malloc(120003); assert(large); memcpy(large,"a ",2);memset(large+2,'a',120000);large[120002]=0;
+    measured_codepoints=measure_calls=0;test_heap_largest=0;
+    assert(book_layout_build(large,120002,(EpdRect){0,0,600,1000},10));
+    assert(measured_codepoints<120002*4&&test_heap_largest<16384);
+    book_layout_free();free(large);
+    book_layout_set_first_line_indent(2); book_layout_set_spacing(150,50);
+}
 int main(void) {
     const char *size_text="甲乙丙丁戊己庚辛壬癸。天地玄黄宇宙洪荒。";
     for(int px=18;px<=90;++px){
@@ -179,11 +348,12 @@ int main(void) {
     const char mixed[] = "Wi甲iiW";
     assert(book_layout_build(mixed, strlen(mixed), r, 10));
     assert(book_layout_page_count() == 2);
-    assert(book_layout_page_start_offset(1) == 7);
+    assert(book_layout_page_start_offset(1) == 5);
     drawn[0] = 0;
     book_layout_draw_page(&fb, 0, r, 10);
     book_layout_draw_page(&fb, 1, r, 10);
-    assert(strcmp(drawn, mixed) == 0);
+    assert(!strcmp(drawn, "Wi甲iiW"));
+    assert_wrap_content(mixed);
     assert(book_layout_build("", 0, r, 10));
     assert(book_layout_page_count() == 1);
     assert(book_layout_build(NULL, 0, r, 10));
@@ -223,7 +393,8 @@ int main(void) {
     book_layout_draw_page(&fb, 0, r, 10);
     assert(measured_codepoints <= sizeof(long_line) * 2);
     assert(strlen(drawn) == sizeof(long_line));
-    assert(memcmp(drawn, long_line, sizeof(long_line)) == 0);
+    char long_source[sizeof(long_line)+1]; memcpy(long_source,long_line,sizeof(long_line));long_source[sizeof(long_line)]=0;
+    assert_wrap_content(long_source);
     assert(book_layout_page_start_offset(99) == sizeof(long_line));
     assert(!book_layout_build("\xed\xa0\x80", 3, r, 10));
     assert(!book_layout_build("\xf4\x90\x80\x80", 4, r, 10));
@@ -927,5 +1098,6 @@ int main(void) {
     assert(!strcmp(drawn,zero_width));book_layout_free();test_heap_fail_after=3;
     assert(!book_layout_build(zero_width,6000,(EpdRect){0,0,600,1000},10));
     test_heap_fail_after=-1;test_zero_width=false;book_layout_free();
-    puts("book_layout_host_test: PASS; idle rows/columns equal full rendering, stale cursor rejected and large chapter supported");
+    english_wrap_tests(&fb);
+    puts("book_layout_host_test: PASS; English word wrapping/hyphens, source offsets, idle rows/columns and bounded large chapters");
 }

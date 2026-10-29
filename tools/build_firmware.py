@@ -93,6 +93,9 @@ def export(build, output, board):
     experimental_panel37 = board == 'metalio47' and cache.exists() and 'METALIO_READER_PANEL37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_shelf37 = board == 'metalio47' and cache.exists() and 'METALIO_SHELF37_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_fast_panels = board == 'metalio47' and cache.exists() and 'METALIO_FAST_READER_PANELS:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_du14 = board == 'metalio47' and cache.exists() and 'METALIO_DU14_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_main_clean = board == 'metalio47' and cache.exists() and 'METALIO_MAIN_CLEAN_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
+    experimental_main_clean |= board == 'pico' and cache.exists() and 'PICO_MAIN_CLEAN_EXPERIMENT:BOOL=ON' in cache.read_text(encoding='utf-8')
     experimental_network = board == 'metalio47' and cache.exists() and 'METALIO_NETWORK_PROBE:BOOL=ON' in cache.read_text(encoding='utf-8')
     transfer_start = board == 'metalio47' and cache.exists() and 'METALIO_LOCAL_TRANSFER_START:BOOL=ON' in cache.read_text(encoding='utf-8')
     config_header=build/'config/sdkconfig.h'
@@ -105,6 +108,8 @@ def export(build, output, board):
                 'experimental_reader_panel37': bool(experimental_panel37),
                 'experimental_shelf37': bool(experimental_shelf37),
                 'experimental_fast_reader_panels': bool(experimental_fast_panels),
+                'experimental_du14': bool(experimental_du14),
+              'experimental_main_clean': bool(experimental_main_clean),
                 'experimental_network_probe': bool(experimental_network),
                 'local_transfer_start_test': bool(transfer_start),
                 'experimental_early_power_key': bool(early_key),
@@ -154,6 +159,8 @@ def export(build, output, board):
               'experimental_reader_panel37': bool(experimental_panel37),
               'experimental_shelf37': bool(experimental_shelf37),
               'experimental_fast_reader_panels': bool(experimental_fast_panels),
+              'experimental_du14': bool(experimental_du14),
+              'experimental_main_clean': bool(experimental_main_clean),
               'experimental_network_probe': bool(experimental_network),
               'local_transfer_start_test': bool(transfer_start),
               'experimental_early_power_key': bool(early_key),
@@ -188,6 +195,9 @@ def build_one(board, args):
                '-DMETALIO_READER_PANEL37_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_reader_panel37 else 'OFF'),
                '-DMETALIO_SHELF37_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_shelf37 else 'OFF'),
                '-DMETALIO_FAST_READER_PANELS=' + ('ON' if board == 'metalio47' and args.s31_fast_reader_panels else 'OFF'),
+               '-DMETALIO_DU14_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_du14 else 'OFF'),
+               '-DMETALIO_MAIN_CLEAN_EXPERIMENT=' + ('ON' if board == 'metalio47' and args.s31_main_clean else 'OFF'),
+               '-DPICO_MAIN_CLEAN_EXPERIMENT=' + ('ON' if board == 'pico' and args.pico_main_clean else 'OFF'),
                '-DMETALIO_UI_GRAY22_EXPERIMENT=OFF',
                '-DMETALIO_NETWORK_PROBE=' + ('ON' if board == 'metalio47' and args.s31_network_probe else 'OFF'),
                '-DMETALIO_LOCAL_TRANSFER_START=' + ('ON' if board == 'metalio47' and getattr(args, 's31_transfer_startup_test', False) else 'OFF'),
@@ -278,6 +288,9 @@ def main():
     parser.add_argument('--s31-reader-panel37', action='store_true', help='Explicit local S31 GL37 panel experiment; cleanup and normal builds stay native48')
     parser.add_argument('--s31-shelf37', action='store_true', help='Explicit local S31 GL37 shelf art/chrome experiment; other pages/cleanup stay unchanged')
     parser.add_argument('--s31-fast-reader-panels', action='store_true', help='Explicit local four-gray16 font/reading settings experiment')
+    parser.add_argument('--s31-du14', action='store_true', help='Explicit local S31 vendor14-phase binary experiment; gray/cleanup keep their tables')
+    parser.add_argument('--pico-main-clean', action='store_true', help='Local Pico root-switch erasure using its own LUTs within40 phases')
+    parser.add_argument('--s31-main-clean', action='store_true', help='Local S31 root-switch quality: six/eight changed-white drives plus two release holds')
     parser.add_argument('--s31-network-probe', action='store_true', help='Local S31 read-only radio counters; not a delivery default')
     parser.add_argument('--s31-transfer-startup-test', action='store_true', help='Unattended local S31 transfer startup; never deliver')
     parser.add_argument('--s31-early-power-key', action='store_true', help='Local S31 bootloader P17 capture experiment; requires a matched bootloader and application')
@@ -293,6 +306,12 @@ def main():
         parser.error('--s31-shelf37 requires metalio47 or all')
     if args.s31_fast_reader_panels and args.board=='pico':
         parser.error('--s31-fast-reader-panels requires metalio47 or all')
+    if args.s31_du14 and args.board == 'pico':
+        parser.error('--s31-du14 requires metalio47 or all')
+    if args.pico_main_clean and args.board == 'metalio47':
+        parser.error('--pico-main-clean requires pico or all')
+    if args.s31_main_clean and args.board == 'pico':
+        parser.error('--s31-main-clean requires metalio47 or all')
     if args.s31_network_probe and args.board == 'pico':
         parser.error('--s31-network-probe requires metalio47 or all')
     if args.s31_transfer_startup_test and args.board == 'pico':

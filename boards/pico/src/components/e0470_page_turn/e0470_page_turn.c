@@ -6,8 +6,8 @@
  * Built on the MindReset Read Pico E0470 waveform and refresh path.
  * 错相揭页引擎实现。阅读使用8带/GL16；主页可指定柔和序列和条带数。差分只算一次，每拍只换对应相位的1K LUT。
  * Staggered page-turn engine: reading uses 8 bands / GL16; main pages may supply a soft sequence and band count. Calculate differences once and select per-band 1 KiB phase LUTs on each tick.
- * 用户最新指定：阅读和主页均8带37相共44拍，每拍11090us；保留各自灰阶序列、完整相位与原错开启动接口。
- * Latest user request: reader and main use eight bands/37 phases over 44 ticks at 11090us, with independent gray sequences. Preserve every scan phase and the spaced-launch API.
+ * 用户2026-10-29：根页清理支持45相，阅读仍41相；保留方向、11090us节拍及各自灰阶序列。
+ * User revision 2026-10-29: support45-phase root cleanup while reading retains41; preserve direction,11090us pacing and independent gray sequences.
  * 用户修订：普通书架分区在同一帧同步执行柔和/校准序列，不串行刷上下中三块；原阅读及主页水波纹入口保持。
  * User revision: ordinary shelf regions execute soft/calibrated sequences in each shared frame instead of three serial updates; retain reader/main ripple entry points.
  */
@@ -28,7 +28,7 @@ static const char* TAG = "e0470_turn";
 
 #define TURN_DEFAULT_BANDS E0470_TURN_FAST_BANDS
 #define TURN_BANDS_MAX 32
-#define TURN_PHASE_CAP 40
+#define TURN_PHASE_CAP 45
 #define TURN_LINE_MAX 2048
 
 static uint8_t (*s_lut)[1024];
@@ -219,8 +219,8 @@ static void assign_bands(
 }
 
 static bool build_luts(const EpdWaveformPhases* gl) {
-    // 37 KiB 相位表按需放入 PSRAM；避免长期占用 WiFi 和 USB 需要的内部内存。
-    // Allocate the 37 KiB phase table in PSRAM on demand, preserving internal RAM for WiFi and USB.
+    // Pico最多45相LUT按需放PSRAM；根页八相补白不截断，不增加内部帧缓冲。
+    // Allocate at most45 KiB in PSRAM on demand; preserve all root-white phases without another internal framebuffer.
     if (!s_lut) {
         s_lut = heap_caps_aligned_alloc(16, sizeof(uint8_t[TURN_PHASE_CAP][1024]),
                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

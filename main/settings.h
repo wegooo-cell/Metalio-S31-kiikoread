@@ -51,10 +51,10 @@ void app_settings_set_pin_grace_code(uint8_t code);
 unsigned app_settings_pin_grace_minutes(void);
 uint32_t app_settings_pin_locked_at(void);
 void app_settings_record_pin_lock(uint32_t unix_seconds);
-/// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
+/// 首页进入时强制全刷；无配置时默认开启，保留已保存的选择。/ Full refresh when entering Home; on when unconfigured, retaining saved choices.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);
-/// 首页组件默认书夹；选择与每日目标均掉电保存。/ Persist the Home widget and daily goal across power loss.
+/// 首页组件无配置时默认Moon Clock；选择与每日目标掉电保存。/ Default to Moon Clock when unconfigured; persist the widget and daily goal.
 typedef enum {
     APP_HOME_FOLDER = 0, APP_HOME_CLOCK = 1, APP_HOME_ASTERISK = 2,
     // 3为旧组件的保留编号，不能重排已有配置。/ ID 3 is retired; preserve existing persisted IDs.
@@ -224,7 +224,7 @@ uint8_t app_settings_book_paragraph_value(uint8_t level);
 uint8_t app_settings_book_paragraph_level(uint8_t percent);
 uint8_t app_settings_book_paragraph_spacing(void);
 void app_settings_set_book_paragraph_spacing(uint8_t percent);
-/// 书架样式：1 深色书轨、2 亚克力、5 列表；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5); retired IDs 3/4 fall back to 2.
+/// 书架样式：1 深色书轨、2 亚克力、5 列表、6 液态玻璃；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5), liquid glass (6); retired IDs 3/4 fall back to 2.
 uint8_t app_settings_shelf_style(void);
 void app_settings_set_shelf_style(uint8_t style);
 /// 固定 TF 根目录：/sdcard/books 与 /sdcard/fonts；旧配置/备份不能修改。/ Fixed TF roots, unaffected by legacy settings/backups.

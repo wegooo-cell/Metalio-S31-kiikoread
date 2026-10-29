@@ -85,6 +85,7 @@ static int s_visible_count=4;
 static int shelf_rows(void){return 4;}
 static int app_settings_shelf_style(void){return style;}
 static bool app_settings_main_fast_refresh(void){return false;}
+static void ui_acrylic_bw_rect(uint8_t *fb,EpdRect r){(void)fb;(void)r;assert(0);}
 static bool fast_cover_matches(int row,EpdRect r){(void)row;(void)r;return false;}
 static int ui_content_width(void){return 612;}
 #define UI_MARGIN 36

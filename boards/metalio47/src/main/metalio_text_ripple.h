@@ -14,5 +14,7 @@
 bool metalio_text_ripple_prepare(EpdiyHighlevelState* hl, EpdRect area);
 /// 独立生成的实验表；不可用或本次开机已降级时返回NULL。/ Independently generated experimental table; NULL when unavailable or disabled for this boot.
 const EpdWaveform* metalio_text_ripple_waveform(void);
+/// 阅读水波纹保留22相迁移，原尾保持前增加六相目标白，包含等白。/ Reader ripple retains22 transition phases, inserting six white-target phases including equal whites before settling.
+const EpdWaveform* metalio_text_ripple_clean_waveform(void);
 /// 扫描失败后本次开机回到完整文字波形，不写入设置。/ Return to complete text phases after a scan failure, without persisting settings.
 void metalio_text_ripple_disable(void);

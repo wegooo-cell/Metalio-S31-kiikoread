@@ -173,10 +173,21 @@ int main(void) {
     e0470_waveform_init();
 #ifdef KIIKO_TEST_MAIN_SWITCH_ERASE
     // Exercise the real compact main-page engine with50-gray/22-BW phases, not only LUT generation.
-    const EpdWaveform *switch_sources[]={display_main_water_waveform(),display_main_bw_turn_waveform()};
-    for(int kind=0;kind<2;++kind){
+    const EpdWaveform *switch_sources[]={display_main_water_waveform(),display_main_bw_turn_waveform(),display_main_switch_waveform(display_main_normal_waveform(),MODE_GL16)};
+    for(int kind=0;kind<3;++kind){
         const EpdWaveform *wave=display_main_switch_waveform(switch_sources[kind],MODE_GL16);
-        test_phases=kind?22:50;test_bands=8;test_skip=0;test_paired_tail=false;
+        test_phases=kind==2?52:kind?22:50;test_bands=8;test_skip=0;test_paired_tail=false;
+#if KIIKO_S31_MAIN_CLEAN
+        #ifndef KIIKO_TEST_WHITE_PHASES
+#define KIIKO_TEST_WHITE_PHASES 6
+#endif
+        #ifdef KIIKO_TEST_ROOT_BACKGROUND
+        wave=display_main_background_waveform_with_phases(wave,MODE_GL16,KIIKO_TEST_WHITE_PHASES);
+#else
+        wave=display_main_clean_waveform_with_phases(wave,MODE_GL16,KIIKO_TEST_WHITE_PHASES);
+#endif
+        test_phases+=KIIKO_TEST_WHITE_PHASES+2;
+#endif
         assert(e0470_waveform_phases(wave,MODE_GL16)->phases==test_phases);
         for(int rot=0;rot<4;++rot)for(int dir=0;dir<4;++dir){
             rotation=(enum EpdRotation)rot;fill();scans=fail_at=0;now=0;scan_us=15000;
@@ -194,7 +205,7 @@ int main(void) {
         }
         e0470_page_turn_release();
     }
-    puts("PASS: actual main-band engine50-gray/22-BW,8 bands,57/29 ticks,all phases per band,4 rotations/directions,all failure ticks preserve real history");
+    puts("PASS: actual main-band engine,8 bands,all selected phases per band,4 rotations/directions,all failure ticks preserve real history");
     return 0;
 #endif
     uint8_t vendor[3][48*64];const int modes[]={MODE_GL16,MODE_GC16,MODE_DU};
@@ -247,6 +258,13 @@ int main(void) {
     assert(e0470_page_turn_with_waveform_compact(&hl,(EpdRect){0,0,H,W},E0470_TURN_RTL,wave,10)==EPD_DRAW_NO_PHASES_AVAILABLE);
     assert(!scans&&!memcmp(back,saved_back,N));water_test_alloc_fail=0;
     reader_tail_test(&hl,wave,22);
+    const EpdWaveform* clean=metalio_text_ripple_clean_waveform();
+    const EpdWaveformPhases* cp=e0470_waveform_phases(clean,MODE_GL16);assert(cp&&cp->phases==28);
+    for(int f=0;f<28;++f)for(int to=0;to<16;++to)for(int from=0;from<16;++from){
+        int want=f<18?e0470_phase_action(p,f,to,from):f<24?(to==15?2:0):0;
+        assert(e0470_phase_action(cp,f,to,from)==want);
+    }
+    reader_tail_test(&hl,clean,28);
     metalio_text_ripple_disable();fill();assert(!display_reader_fast_ripple_enabled()&&!metalio_text_ripple_waveform());
     assert(!metalio_text_ripple_prepare(&hl,(EpdRect){0,0,H,W})&&!memcmp(front,saved_front,N));
     printf("PASS: %u action cells; four rotations/crops,22 phases/10 bands/31 ticks,31 scan failures,slow scan,OOM and boot-local fallback\n",checked);

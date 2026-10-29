@@ -16,6 +16,11 @@ set(ENV{KIIKO_BOARD} "${KIIKO_BOARD}")
 if(NOT DEFINED SDKCONFIG_DEFAULTS)
     set(SDKCONFIG_DEFAULTS "${KIIKO_BOARD_ROOT}/sdkconfig.defaults")
 endif()
+# S31专用本地波形实验；板级与正式构建开关隔离。/ S31-only local waveform experiment, isolated from other boards and release defaults.
+option(METALIO_DU14_EXPERIMENT "Local S31 vendor DU14 black/white experiment" OFF)
+if(METALIO_DU14_EXPERIMENT AND NOT KIIKO_BOARD_METALIO47)
+    message(FATAL_ERROR "DU14 experiment requires Metalio S31")
+endif()
 add_compile_definitions(KIIKO_BOARD_METALIO47=${KIIKO_BOARD_METALIO47})
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.

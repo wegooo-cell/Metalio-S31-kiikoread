@@ -122,8 +122,8 @@ static const app_desc_t* s_presented_main;
 static ui_quick_menu_t s_quick;
 static unsigned s_quick_status;
 static int s_quick_pressed=-1;
-#if KIIKO_BOARD_METALIO47
 static const app_desc_t* s_presented_root;
+#if KIIKO_BOARD_METALIO47
 static ui_ai_menu_t s_ai;
 static unsigned s_quick_slider_dirty;
 static unsigned s_quick_slider_drawn[2],s_quick_slider_level[2];
@@ -379,9 +379,7 @@ static bool navigation_input_ready(app_ctx_t* ctx,const app_desc_t* app) {
 }
 
 static void main_present_finished(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
-#if KIIKO_BOARD_METALIO47
     if(redraw!=APP_REDRAW_NONE)s_presented_root=main_page_ready(ctx,app)?app:NULL;
-#endif
     if (redraw == APP_REDRAW_DONE || !navigation_page_ready(ctx, app)) s_presented_main = NULL;
     else if (redraw != APP_REDRAW_NONE) s_presented_main = app;
     display_main_transition_disarm();
@@ -391,6 +389,11 @@ void app_lock_ignore_for(int64_t ms) {
     s_lock_ignore_until_ms = esp_timer_get_time() / 1000 + ms;
 }
 
+#if KIIKO_BOARD_METALIO47
+static bool app_binary_ui(app_ctx_t *ctx,const app_desc_t *app) {
+    return app->binary_ui && (!app->grayscale_ui || !app->grayscale_ui(ctx));
+}
+#endif
 static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
 #ifdef KIIKO_LOCAL_LATENCY
     const int64_t probe_start=esp_timer_get_time();
@@ -407,9 +410,9 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
     enum EpdDrawError result = EPD_DRAW_SUCCESS;
 #if KIIKO_BOARD_METALIO47
     bool returning=ctx->request_back_ripple;
-    const bool root_water=app->binary_ui && s_presented_main && s_presented_main!=app && navigation_page_ready(ctx,app) &&
+    const bool root_water=app_binary_ui(ctx,app) && s_presented_main && s_presented_main!=app && navigation_page_ready(ctx,app) &&
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER;
-    if ((app->binary_ui || returning) && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
+    if ((app_binary_ui(ctx,app) || returning) && (redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_FULL)) {
         ctx->request_back_ripple = false;
         ui_click_feedback_reset();
         ui_click_feedback_begin(ctx->fb);
@@ -422,7 +425,9 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
         const EpdRect screen={0,0,epd_rotated_display_width(),
             navigation_page_ready(ctx,app)?UI_NAV_MARKER_SCAN_END:epd_rotated_display_height()};
         result = redraw == APP_REDRAW_FULL ? update_display_full(ctx->hl) : returning || root_water
-            ? update_display_water_turn(ctx->hl,screen,returning?E0470_TURN_LTR:E0470_TURN_RTL)
+            ? (app->grayscale_ui&&app->grayscale_ui(ctx)
+                ? update_display_main_turn(ctx->hl,screen,returning?E0470_TURN_LTR:E0470_TURN_RTL)
+                : update_display_water_turn(ctx->hl,screen,returning?E0470_TURN_LTR:E0470_TURN_RTL))
             : update_display_area_diff_with(ctx->hl,display_main_bw_waveform(),MODE_DU,screen);
         if(redraw==APP_REDRAW_PAGE)display_page_prepare_end(prepared);
         guard_draw_result(ctx->hl, result);
@@ -465,11 +470,11 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
     if ((redraw == APP_REDRAW_PAGE || redraw == APP_REDRAW_AREA) &&
         s_presented_main == app && navigation_page_ready(ctx, app)
 #if KIIKO_BOARD_METALIO47
-        && !app->binary_ui
+        && !app_binary_ui(ctx,app)
 #endif
         ) display_main_transition_arm(app, false, false);
 #if KIIKO_BOARD_METALIO47
-    if(navigation_page_ready(ctx,app)&&(app_index_of(app)==2||app_index_of(app)==3) &&
+    if(!(app->grayscale_ui&&app->grayscale_ui(ctx))&&navigation_page_ready(ctx,app)&&(app_index_of(app)==2||app_index_of(app)==3) &&
        app_settings_main_refresh_mode()!=APP_MAIN_REFRESH_WATER)display_main_transition_monochrome();
     const bool prepare_page=redraw==APP_REDRAW_PAGE&&navigation_page_ready(ctx,app);
     const bool prepare_held=prepare_page?display_page_prepare_begin():false;
@@ -522,13 +527,16 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
 // 将系统页策略限制在实际推屏作用域；下拉玻璃、锁屏及阅读不继承它。
 // Scope system policy to presentation so quick-menu glass, lock and reader do not inherit it.
 void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
+    const bool root_switch=redraw==APP_REDRAW_PAGE &&
+        s_presented_root && s_presented_root!=app && main_page_ready(ctx,app);
+    const bool shelf_switch=root_switch &&
+        (app_index_of(s_presented_root)==1 || app_index_of(app)==1);
+    unsigned prior_quality=display_main_quality_set(root_switch?(shelf_switch?8u:6u):0u);
 #if KIIKO_BOARD_METALIO47
-    bool prior_erase=display_main_switch_erase_set(redraw==APP_REDRAW_PAGE &&
-        s_presented_root && s_presented_root!=app && main_page_ready(ctx,app));
-    bool prior_home_erase=display_main_shelf_home_erase_set(redraw==APP_REDRAW_PAGE &&
-        s_presented_root && app_index_of(s_presented_root)==1 &&
-        app_index_of(app)==0 && main_page_ready(ctx,app));
-    bool previous=display_system_binary_set(app->binary_ui);
+    bool prior_erase=display_main_switch_erase_set(root_switch);
+    bool prior_home_erase=display_main_shelf_home_erase_set(root_switch &&
+        app_index_of(s_presented_root)==1 && app_index_of(app)==0);
+    bool previous=display_system_binary_set(app_binary_ui(ctx,app));
     bool previous_nav=display_system_navigation_set(navigation_page_ready(ctx,app));
 #endif
     app_present_impl(ctx,app,redraw);
@@ -538,16 +546,17 @@ void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
     display_main_switch_erase_set(prior_erase);
     display_main_shelf_home_erase_set(prior_home_erase);
 #endif
+    display_main_quality_set(prior_quality);
 }
 
 // 反馈只推控件附近，失败后重新绘制当前页面；不占用底栏切页许可。
 // Push feedback only near its control, repainting the current page on failure without consuming navigation permission.
 static void click_present(app_ctx_t *ctx, const app_desc_t *current, EpdRect area) {
 #if KIIKO_BOARD_METALIO47
-    if(navigation_page_ready(ctx,current)&&(app_index_of(current)==2||app_index_of(current)==3))display_monochrome_content(ctx->fb);
+    if(app_binary_ui(ctx,current)&&navigation_page_ready(ctx,current)&&(app_index_of(current)==2||app_index_of(current)==3))display_monochrome_content(ctx->fb);
 #endif
 #if KIIKO_BOARD_METALIO47
-    bool previous=display_system_binary_set(current->binary_ui);
+    bool previous=display_system_binary_set(app_binary_ui(ctx,current));
     bool previous_nav=display_system_navigation_set(navigation_page_ready(ctx,current));
 #endif
     enum EpdDrawError error = update_display_click_feedback(ctx->hl,area);
@@ -1692,7 +1701,7 @@ void app_loop_run(const app_loop_config_t* config) {
             !ui_click_feedback_active() && !ctx.request_app && !ctx.request_menu && !ctx.request_return &&
             ui_nav_refresh_power(ctx.fb)) {
 #if KIIKO_BOARD_METALIO47
-            bool previous=display_system_binary_set(current->binary_ui);
+            bool previous=display_system_binary_set(app_binary_ui(&ctx,current));
             bool previous_nav=display_system_navigation_set(navigation_page_ready(&ctx,current));
             guard_draw_result(ctx.hl,update_display_area_diff_with(ctx.hl,&E0470_FOLLOW_WAVEFORM,
                 MODE_DU,ui_nav_status_area()));

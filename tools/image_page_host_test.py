@@ -39,7 +39,7 @@ typedef struct {bool mounted;} read_pico_sd_info_t;
 static int test_alloc_fail,test_malloc_fail,test_dimensions_fail,test_decode_fail,test_decodes,test_presentations;
 static unsigned test_pixels,test_mono_calls,test_list_calls,test_hint_calls;
 static bool test_tall;
-#if KIIKO_BOARD_METALIO47
+#if 1
 static char wallpaper[288],bookmark[288];static unsigned lock_style_returns;
 static void app_device_settings_resume_lock_style(void){++lock_style_returns;}static unsigned lock_style,setting_writes;
 static const char *app_settings_wallpaper_path(void){return wallpaper;}
@@ -57,7 +57,7 @@ enum EpdDrawError {EPD_DRAW_SUCCESS};
 static const int E0470_FULL_WAVEFORM=0;
 static bool test_binary;
 static void display_main_transition_cancel(void){}
-static int update_display_area_full_with(void *hl,const int *wave,int mode,EpdRect area){(void)hl;assert(!test_binary&&wave==&E0470_FULL_WAVEFORM&&mode==MODE_GL16&&area.x==0&&area.y==0&&area.width==684&&area.height==1216);++test_presentations;return 0;}
+static enum EpdDrawError update_display_area_full_with(void *hl,const int *wave,int mode,EpdRect area){(void)hl;assert(!test_binary&&wave==&E0470_FULL_WAVEFORM&&mode==MODE_GL16&&area.x==0&&area.y==0&&area.width==684&&area.height==1216);++test_presentations;return 0;}
 typedef enum {UI_ICON_LOCK,UI_ICON_HOUSE,UI_ICON_BOOKMARK,UI_ICON_CHEVRON_RIGHT} ui_icon_t;
 static bool glass_fail;
 static bool ui_glass_panel_frost(uint8_t *fb,EpdRect r,int radius,int white,int refract,bool soften){(void)fb;assert(r.x==70&&r.y==346&&r.width==544&&(r.height==468||r.height==372)&&radius==28&&white>=95&&refract==3&&soften);return !glass_fail;}
@@ -68,6 +68,18 @@ static bool display_system_binary_set(bool binary){bool previous=test_binary;tes
 static void display_monochrome_frame(uint8_t *fb){++test_mono_calls;for(size_t i=0;i<684u*1216u;++i)fb[i]=fb[i]<128?0:255;}
 static enum EpdDrawError update_display_mode_diff(void *hl,int mode){(void)hl;assert(test_binary&&mode==MODE_DU);++test_list_calls;return EPD_DRAW_SUCCESS;}
 static enum EpdDrawError update_display_full(void *hl){(void)hl;if(test_binary)++test_list_calls;else ++test_presentations;return EPD_DRAW_SUCCESS;}
+#endif
+#if !KIIKO_BOARD_METALIO47
+static const int E0470_FULL_WAVEFORM=0;
+static bool test_binary;
+typedef enum {UI_ICON_LOCK,UI_ICON_HOUSE,UI_ICON_BOOKMARK,UI_ICON_CHEVRON_RIGHT} ui_icon_t;
+static bool glass_fail;
+static bool ui_glass_panel_frost(uint8_t *fb,EpdRect r,int radius,int white,int refract,bool soften){(void)fb;assert(r.x==70&&r.y==346&&r.width==544&&(r.height==468||r.height==372)&&radius==28&&white>=95&&refract==3&&soften);return !glass_fail;}
+static void ui_draw_icon(uint8_t *fb,int x,int y,int size,ui_icon_t icon,uint8_t gray){(void)fb;(void)x;(void)y;(void)size;(void)icon;assert(!gray);}
+static void ui_draw_button(uint8_t *fb,EpdRect r,const char *text,bool on){(void)fb;assert((r.y==642||r.y==546)&&!strcmp(text,"取消")&&!on);}
+
+static enum EpdDrawError update_display_area_diff_with(void *hl,const int *wave,int mode,EpdRect area){(void)hl;assert(wave==&E0470_FULL_WAVEFORM&&mode==MODE_GL16&&area.x==0&&area.y==0&&area.width==684&&area.height==1216);++test_presentations;return 0;}
+static enum EpdDrawError update_display_full(void *hl){(void)hl;++test_presentations;return EPD_DRAW_SUCCESS;}
 #endif
 static void *heap_caps_calloc(size_t n,size_t size,int cap){(void)cap;return test_alloc_fail?NULL:calloc(n,size);}
 static void *heap_caps_malloc(size_t n,int cap){(void)cap;if(test_malloc_fail&&!--test_malloc_fail)return NULL;return malloc(n);}
@@ -86,7 +98,7 @@ static void ui_text(uint8_t *fb,...){(void)fb;}
 static void ui_hairline(uint8_t *fb,...){(void)fb;}
 static void ui_fill_round_rect(uint8_t *fb,...){(void)fb;}
 static void ui_draw_round_rect(uint8_t *fb,...){(void)fb;}
-static int update_display_image_gray(void *hl){(void)hl;++test_presentations;return 0;}
+static enum EpdDrawError update_display_image_gray(void *hl){(void)hl;++test_presentations;return 0;}
 static void guard_draw_result(void *hl,int result){(void)hl;assert(!result);}
 static void *app_home_page(void){return NULL;}
 static int ui_nav_hit(int x,int y){(void)x;(void)y;return -1;}
@@ -110,7 +122,7 @@ int main(void){
  assert(present(&ctx,APP_REDRAW_PAGE)&&test_presentations==1&&test_pixels==(size_t)s_width*s_height);
  assert(test_mono_calls==before_mono);
  unsigned levels=0;for(size_t i=0;i<sizeof(fb);++i){assert(fb[i]%17==0);levels|=1u<<(fb[i]/17);}assert(levels==65535);
-#if KIIKO_BOARD_METALIO47
+#if 1
  assert(test_hint_calls==1);
  assert(!app_image.binary_ui);
  uint8_t *decoded=s_gray;int selected=s_selected;
@@ -140,7 +152,7 @@ int main(void){
  assert(s_height==1160);
  for(unsigned policy=0;policy<2;++policy){test_binary=policy;assert(present(&ctx,APP_REDRAW_PAGE));assert(test_binary==policy);}
 #else
- assert(s_height==1216);
+ assert(s_height==1160);
 #endif
  test_tall=false;
  image_on_exit(&ctx);assert(!s_gray&&!s_viewing);
@@ -185,7 +197,10 @@ int main(void){
 }
 """
 for board in ('pico','metalio47'):
-    source=select_source(raw_source,board)
+    overlay=root/'boards/pico/src/main/apps/app_image.c'
+    actual=overlay.read_text() if board=='pico' and overlay.exists() else raw_source
+    source=select_source(actual,board)
+    source=source.replace('#include \"image_lock_menu.inc\"',(root/'main/apps/image_lock_menu.inc').read_text())
     source=re.sub(r'^#include .*\n','',source,flags=re.M)
     source=re.sub(r'^extern const uint8_t display_test_png_.*\n','',source,flags=re.M)
     with tempfile.TemporaryDirectory() as folder:

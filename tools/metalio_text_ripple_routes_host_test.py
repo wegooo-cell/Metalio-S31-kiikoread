@@ -23,6 +23,8 @@ static bool s_clear_confirm,s_reader_text_frame,s_reader_cleanup,s_save_failed,s
 static bool s_reader_image_frame,s_reader_image_exit_pending;
 static bool chrome,background;
 static void reader_zoom_reset(void){}
+static size_t current_toc_position(void){return 0;}
+static int book_toc_open(size_t position){(void)position;return 0;}
 static int images,effect,full,s_turns,s_turn_direction,s_view,s_water_turn_dir,s_unsaved;
 static unsigned s_page,s_stats_pending_turns,s_session_turns,s_chapter;
 static int64_t s_last_turn_ms,s_stats_activity_ms;
@@ -97,6 +99,9 @@ static const EpdWaveform*display_reader_text_waveform(void){return &normal;}
 static bool system_navigation_gray_changed(EpdiyHighlevelState*h){(void)h;return false;}
 static const EpdWaveform*display_main_navigation_waveform(void){return &normal;}
 static const EpdWaveform*display_main_bw_turn_waveform(void){return &normal;}
+static bool s_main_switch_erase;
+static const EpdWaveform*display_main_clean_waveform(const EpdWaveform*w,int mode){(void)mode;return w;}
+static const EpdWaveform*main_switch_waveform(const EpdWaveform*w,int mode){assert(mode==MODE_GL16);return w;}
 static void system_normalize(EpdiyHighlevelState*h){(void)h;assert(s_system_binary);}
 static bool metalio_text_ripple_prepare(EpdiyHighlevelState*h,EpdRect a){(void)h;(void)a;++prepares;return prepare&&!disabled;}
 static const EpdWaveform*metalio_text_ripple_waveform(void){assert(!disabled);return &fast;}

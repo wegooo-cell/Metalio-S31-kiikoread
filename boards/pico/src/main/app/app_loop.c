@@ -101,6 +101,7 @@ extern const app_desc_t app_transfer;
 extern const app_desc_t app_book;
 
 static const app_desc_t* s_presented_main;
+static const app_desc_t* s_presented_root;
 static ui_quick_menu_t s_quick;
 static unsigned s_quick_status;
 static int s_quick_pressed=-1;
@@ -116,6 +117,7 @@ static void main_lock_boundary(void) {
     ui_click_feedback_reset();
     quick_reset();
     s_presented_main = NULL;
+    s_presented_root = NULL;
     display_main_transition_cancel();
 }
 
@@ -243,6 +245,7 @@ static bool navigation_input_ready(app_ctx_t* ctx,const app_desc_t* app) {
 }
 
 static void main_present_finished(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t redraw) {
+    if(redraw!=APP_REDRAW_NONE)s_presented_root=main_page_ready(ctx,app)?app:NULL;
     if (redraw == APP_REDRAW_DONE || !navigation_page_ready(ctx, app)) s_presented_main = NULL;
     else if (redraw != APP_REDRAW_NONE) s_presented_main = app;
     display_main_transition_disarm();
@@ -341,7 +344,13 @@ static void app_present_impl(app_ctx_t* ctx, const app_desc_t* app, app_redraw_t
 // 将系统页策略限制在实际推屏作用域；下拉玻璃、锁屏及阅读不继承它。
 // Scope system policy to presentation so quick-menu glass, lock and reader do not inherit it.
 void app_present(app_ctx_t* ctx,const app_desc_t* app,app_redraw_t redraw) {
+    const bool root_switch=redraw==APP_REDRAW_PAGE &&
+        s_presented_root && s_presented_root!=app && main_page_ready(ctx,app);
+    const bool shelf_switch=root_switch &&
+        (app_index_of(s_presented_root)==1 || app_index_of(app)==1);
+    unsigned previous=display_main_quality_set(root_switch?(shelf_switch?8u:6u):0u);
     app_present_impl(ctx,app,redraw);
+    display_main_quality_set(previous);
 }
 
 // 反馈只推控件附近，失败后重新绘制当前页面；不占用底栏切页许可。
@@ -492,6 +501,7 @@ static void switch_to(
 // 菜单页不是 app，单独画。/ The menu is not an app; present it here.
 static void present_menu(app_ctx_t* ctx, const app_desc_t* current, int leaf, menu_feedback_t* feedback) {
     s_presented_main = NULL;
+    s_presented_root = NULL;
     feedback->updates = 0;
     if (display_take_white_exit()) {
         guard_draw_result(ctx->hl, update_display_white(ctx->hl));
@@ -645,6 +655,7 @@ bool app_poll_main_navigation(app_ctx_t *ctx) {
 void app_loop_run(const app_loop_config_t* config) {
     s_media_recovery_attempts = 0; s_media_recovery_after_ms = 0;
     s_presented_main = NULL;
+    s_presented_root = NULL;
     s_nav_contact_down=s_nav_polled=false;
     const app_desc_t* current = config->first_app != NULL
         ? config->first_app

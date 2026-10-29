@@ -509,12 +509,13 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
         !hl->dirty_lines || !hl->dirty_columns) return EPD_DRAW_NO_PHASES_AVAILABLE;
     if (epd_get_rotation() != EPD_ROT_INVERTED_PORTRAIT || area.x || area.width != h ||
         area.y < 0 || area.height <= 0 || area.y > w || area.height > w - area.y ||
-        (area.y & 31) || (area.height & 31) || strong_area.x || strong_area.width != h ||
+        (area.y & 1) || (area.height & 1) || strong_area.x || strong_area.width != h ||
         strong_area.y < area.y || strong_area.height <= 0 || strong_area.y > area.y + area.height ||
         strong_area.height > area.y + area.height - strong_area.y ||
         (strong_area.y & 31) || (strong_area.height & 31)) return EPD_DRAW_INVALID_CROP;
     if (strong_mode != MODE_GL16 && strong_mode != MODE_GC16) return EPD_DRAW_NO_PHASES_AVAILABLE;
     const EpdWaveformPhases* soft = e0470_waveform_phases(soft_waveform, MODE_GL16);
+    if(!soft)soft=e0470_waveform_phases(soft_waveform,MODE_DU);
     const EpdWaveformPhases* strong = e0470_waveform_phases(strong_waveform, strong_mode);
     if (!soft || !strong || !soft->luts || !strong->luts ||
         soft->phases <= 0 || strong->phases <= 0 || soft->phases > TURN_PHASE_CAP ||
@@ -525,8 +526,8 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
     uint8_t (*luts)[1024] = heap_caps_aligned_alloc(16, 2048, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!luts) return EPD_DRAW_NO_PHASES_AVAILABLE;
     const uint8_t* lut_ptrs[] = {luts[0], luts[1]};
-    const int starts[] = {area.y, strong_area.y, strong_area.y + strong_area.height};
-    const int ends[] = {strong_area.y, strong_area.y + strong_area.height, area.y + area.height};
+    const int starts[] = {area.y&~31, strong_area.y, strong_area.y + strong_area.height};
+    const int ends[] = {strong_area.y, strong_area.y + strong_area.height, (area.y+area.height+31)&~31};
     const EpdRect phys = rotate_to_fb(area);
     epd_difference_image_cropped(hl->front_fb, hl->back_fb, phys, hl->difference_fb,
                                   hl->dirty_lines, hl->dirty_columns);
@@ -554,4 +555,28 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
     heap_caps_free(luts);
     if (error == EPD_DRAW_SUCCESS) copy_front_to_back(hl, phys);
     return error;
+}
+
+enum EpdDrawError e0470_update_native_area(EpdiyHighlevelState* hl,EpdRect area,const EpdWaveform* waveform) {
+    const int w=epd_width(),h=epd_height();
+    if(!hl||!hl->front_fb||!hl->back_fb||!hl->difference_fb||!hl->dirty_lines||!hl->dirty_columns)
+        return EPD_DRAW_NO_PHASES_AVAILABLE;
+    if(epd_get_rotation()!=EPD_ROT_INVERTED_PORTRAIT||area.x||area.width!=h||area.y<0||
+       area.height<=0||area.y>w||area.height>w-area.y)return EPD_DRAW_INVALID_CROP;
+    const EpdRect phys=rotate_to_fb(area);
+    epd_difference_image_cropped(hl->front_fb,hl->back_fb,phys,hl->difference_fb,
+        hl->dirty_lines,hl->dirty_columns);
+    // GC会驱动等值像素，必须用精确半字节掩码保护裁剪边缘，而不能靠等灰保持。
+    // GC drives equal pixels, so exact nibble masks protect the crop rather than equal-gray holds.
+    memset(hl->dirty_lines,1,(size_t)h*sizeof(bool));
+    memset(hl->dirty_columns,0,(size_t)w/2);
+    const int xs=phys.x&~1,xe=(phys.x+phys.width+1)&~1;
+    memset(hl->dirty_columns+xs/2,0xff,(size_t)(xe-xs)/2);
+    if(phys.x&1)hl->dirty_columns[xs/2]&=0xf0;
+    if((phys.x+phys.width)&1)hl->dirty_columns[(xe-1)/2]&=0x0f;
+    epd_clear_phase_luts();epd_poweron();
+    enum EpdDrawError result=epd_draw_base(epd_full_screen(),hl->difference_fb,epd_full_screen(),
+        MODE_PACKING_1PPB_DIFFERENCE|MODE_GC16,25,hl->dirty_lines,hl->dirty_columns,waveform);
+    if(result==EPD_DRAW_SUCCESS)copy_front_to_back(hl,phys);
+    return result;
 }

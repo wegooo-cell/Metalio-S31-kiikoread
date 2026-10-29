@@ -2,13 +2,15 @@
  * SPDX-FileCopyrightText: 2026 mindreset
  * SPDX-License-Identifier: Apache-2.0
  *
- * 中文：借鉴阅读演示的逐码点折行，建立 PSRAM 页表并绘制章节。
- * English: Adapt the reading demo's codepoint wrapping into PSRAM chapter pagination.
+ * 中文：建立 PSRAM 页表并绘制章节，横排优先保留英文整词，中文沿用禁则折行。
+ * English: Paginate and draw chapters in PSRAM, preferring whole English words horizontally while retaining CJK kinsoku wrapping.
  *
  * 冻结：原文由调用方持有；字体测量和绘制必须由调用方串行化。
  * Frozen: Caller owns source text and serializes all font measurement and drawing.
  */
 #include "book_layout.h"
+#include "english_hyphen.h"
+#include "../font/text_glue.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -487,6 +489,92 @@ static bool line_append(size_t at, const char *text, size_t bytes) {
     s_line[at + bytes] = 0;
     return true;
 }
+
+// 英文词含数字、重音字母和组合音标；词内撇号、不换行空格/连字符随词移动。
+// English tokens include digits, accented Latin and combining marks; internal apostrophes and nonbreaking spaces/hyphens stay with the token.
+static bool latin_letter(uint32_t cp) {
+    return (cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z') ||
+        (cp >= 0xc0 && cp <= 0xd6) || (cp >= 0xd8 && cp <= 0xf6) ||
+        (cp >= 0xf8 && cp <= 0x2af) || (cp >= 0x1e00 && cp <= 0x1eff);
+}
+static bool latin_part(uint32_t cp) {
+    return latin_letter(cp) || (cp >= '0' && cp <= '9') || (cp >= 0x300 && cp <= 0x36f);
+}
+static bool latin_member(uint32_t cp, uint32_t previous, size_t at, size_t n, size_t limit) {
+    if (latin_part(cp)) return true;
+    if (cp != '\'' && cp != 0x2019 && cp != 0x2011 && cp != 0xa0 && cp != 0x202f) return false;
+    if (!latin_part(previous) || at + n >= limit) return false;
+    size_t size = codepoint_size(s_text + at + n, limit - at - n);
+    return size && latin_part(codepoint_value(s_text + at + n, size));
+}
+static size_t previous_codepoint(size_t at, size_t start) {
+    if (at > start) --at;
+    while (at > start && ((unsigned char)s_text[at] & 0xc0) == 0x80) --at;
+    return at;
+}
+
+// 只探查一个有界完整词；不把英语规则施加到缩写、法语重音字或连接词上。
+// Probe one bounded whole word; do not apply English patterns to acronyms, accented languages or joined tokens.
+static bool word_hyphen_points(size_t word, size_t limit, uint8_t *points) {
+    size_t start = word;
+    while (start && word - start <= ENGLISH_HYPHEN_MAX && latin_part((unsigned char)s_text[start-1])) --start;
+    if (word - start > ENGLISH_HYPHEN_MAX) return false;
+    size_t at = start;
+    while (at < limit && at - start <= ENGLISH_HYPHEN_MAX) {
+        size_t n = codepoint_size(s_text + at, limit - at);
+        if (!n) return false;
+        uint32_t cp = codepoint_value(s_text + at, n);
+        if (!latin_member(cp, at > start ? (unsigned char)s_text[at-1] : 0, at, n, limit)) break;
+        if (n != 1 || !((cp >= 'a' && cp <= 'z') || (cp >= 'A' && cp <= 'Z'))) return false;
+        at += n;
+    }
+    if (at < word || at - start > ENGLISH_HYPHEN_MAX) return false;
+    uint8_t original[ENGLISH_HYPHEN_MAX + 1];
+    if (!english_hyphen_points(s_text + start, at - start, original)) return false;
+    memset(points, 0, ENGLISH_HYPHEN_MAX + 1);
+    memcpy(points, original + (word - start), at - word + 1);
+    return true;
+}
+
+// 用词间胶水的三次方代价评价本行；不是整段Knuth–Plass，不建立整段节点表。
+// Score this line by cubic word-space badness; this is not paragraph-wide Knuth–Plass and builds no paragraph node list.
+static int line_badness(int64_t delta, int64_t stretch, int64_t shrink) {
+    int64_t capacity = delta < 0 ? shrink : stretch;
+    if (!delta) return 0;
+    if (delta < 0) delta = -delta;
+    if (capacity <= 0 || delta >= capacity * 5) return 10000;
+    int64_t ratio = delta * 256 / capacity;
+    int64_t bad = (100 * ratio * ratio * ratio + (INT64_C(1) << 23)) >> 24;
+    return bad < 10000 ? (int)bad : 10000;
+}
+
+// 只在字表允许的原文字节处添加显示连字符，按空格代价选择；不修改原文或书签偏移。
+// Add display-only hyphens at pattern-approved source offsets, choosing by space badness without changing source/bookmark offsets.
+static bool hyphenate_line(size_t visible, size_t word, size_t limit, int px,
+                           int available, int64_t stretch, int64_t shrink, int best_cost,
+                           size_t *end, int64_t *width) {
+    uint8_t points[ENGLISH_HYPHEN_MAX + 1];
+    if (!word_hyphen_points(word, limit, points)) return false;
+    size_t cut = *end, chosen = 0;
+    int64_t advance = *width, chosen_width = 0;
+    while (cut > word) {
+        size_t previous = previous_codepoint(cut, visible);
+        slot_select_for(previous);
+        int64_t fitted = advance + ttf_text_width_px(px, "-") + s_tracking_px;
+        if (cut - word >= 2 && cut - word <= ENGLISH_HYPHEN_MAX && points[cut-word] && fitted >= 0 &&
+            fitted <= available + shrink) {
+            int cost = line_badness(available - fitted, stretch, shrink) + 50;
+            if (cost < best_cost) { best_cost = cost; chosen = cut; chosen_width = fitted; }
+        }
+        char glyph[5];
+        memcpy(glyph, s_text + previous, cut - previous); glyph[cut - previous] = 0;
+        advance -= ttf_text_width_px(px, glyph) + (previous > visible ? s_tracking_px : 0);
+        cut = previous;
+    }
+    if (!chosen || !line_append(chosen - visible, "-", 1)) return false;
+    *end = chosen; *width = chosen_width;
+    return true;
+}
 static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* next,
                       bool* paragraph_end, int* px, bool* heading,
                       int* line_width, int* indent, uint8_t* align,
@@ -523,6 +611,8 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
     // Printed-book source often contains leading spaces; the reader setting owns the visual indent.
     size_t visible_off = off;
     if (first_line && !*heading && !*align) visible_off = visible_start(off, limit);
+    if (!s_vertical && !first_line)
+        while (visible_off < limit && (s_text[visible_off] == ' ' || s_text[visible_off] == '\t')) ++visible_off;
     if (first_line && !*heading && !*align) {
         if (visible_off < limit && *indent > 0) {
             size_t n = codepoint_size(s_text + visible_off, limit - visible_off);
@@ -546,12 +636,30 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
     int64_t width = 0;
     int64_t last_width = 0;
     int glyph_count = 0;
+    size_t word_start = visible_off, wrap_next = visible_off, wrap_end = visible_off;
+    size_t ink_end = visible_off, before_last_ink = visible_off, resume = SIZE_MAX;
+    int64_t wrap_width = 0, ink_width = 0, before_last_ink_width = 0;
+    bool previous_word = false, english_line = true;
+    int64_t stretch = 0, shrink = 0, ink_stretch = 0, ink_shrink = 0;
+    int64_t wrap_stretch = 0, wrap_shrink = 0;
     s_line[0] = 0;
     *paragraph_end = false;
     while (end < limit && s_text[end] != '\r' && s_text[end] != '\n') {
         size_t n = codepoint_size(s_text + end, s_len - end);
         if (!n) return false;
         uint32_t cp = codepoint_value(s_text + end, n);
+        bool word = !s_vertical && latin_member(cp, last_cp, end, n, limit);
+        if (word && !previous_word) {
+            word_start = end;
+            // 开括号跟随首词；普通连字符自身保留在上一行。
+            // An opener follows its word; an ordinary hyphen stays at the previous line end.
+            bool opener = prohibited_line_end(last_cp);
+            wrap_next = opener ? last_start : end;
+            wrap_end = opener ? before_last_ink : ink_end;
+            wrap_width = opener ? before_last_ink_width : ink_width;
+            wrap_stretch = ink_stretch; wrap_shrink = ink_shrink;
+        }
+        if (cp >= 0x2e80 && cp <= 0xffef) english_line = false;
         // 字体逐字取整后累加 advance；单字测量避免反复扫描整行前缀。
         // Font advances are rounded per glyph and summed; measure each glyph once instead of every prefix.
         char glyph[5];
@@ -561,14 +669,34 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
         // Every glyph is measured in its own span's face; width, tracking and alignment math
         // are untouched.
         slot_select_for(end);
-        int64_t candidate = width + ttf_text_width_px(*px, glyph) +
+        int glyph_advance = ttf_text_width_px(*px, glyph);
+        int64_t candidate = width + glyph_advance +
                             (end > visible_off && !*heading ? s_tracking_px : 0);
         if (candidate < 0) return false;
-        if (candidate > available) {
+        bool english_body = !s_vertical && !*heading && !*align && english_line;
+        if (candidate > available && !(english_body && candidate <= available + shrink)) {
             if (end == visible_off) return false;
+            if (!s_vertical && (word || (previous_word && prohibited_line_start(cp)))) {
+                if (wrap_end > visible_off) {
+                    size_t split = end;
+                    int64_t split_width = width;
+                    int whole_cost = line_badness(available - wrap_width, wrap_stretch, wrap_shrink);
+                    if (word && english_body && hyphenate_line(visible_off, word_start, limit,
+                            *px, available, stretch, shrink, whole_cost, &split, &split_width)) {
+                        end = split; width = split_width;
+                        break;
+                    }
+                    resume = wrap_next;
+                    end = wrap_end; width = wrap_width;
+                    s_line[end - visible_off] = 0;
+                    break;
+                }
+                if (word && english_body && hyphenate_line(visible_off, word_start, limit, *px,
+                        available, stretch, shrink, 10051, &end, &width)) break;
+            }
             // 优先让行尾正文对齐，再允许右标点小幅悬挂到留白；超出安全宽度才回退前一字。
             // Align the text edge first, hang a closing mark slightly into the margin, then roll back only if needed.
-            if (prohibited_line_start(cp)) {
+            if (prohibited_line_start(cp) || (!s_vertical && (cp == '-' || cp == 0x2010))) {
                 // 竖排传 0：列底没有可悬挂的留白，标点一律回退到下一列。
                 // Vertical setting passes 0: a column has no bottom slack to hang into, so the
                 // mark always rolls back to the next column.
@@ -619,13 +747,28 @@ static bool take_line(size_t off, int advance_limit, int hang_margin, size_t* ne
         last_cp = cp;
         if (!line_append(end - visible_off, glyph, n)) return false;
         end += n;
+        before_last_ink = ink_end; before_last_ink_width = ink_width;
+        if (cp == ' ' || cp == '\t') {
+            stretch += text_space_stretch(glyph_advance);
+            shrink += text_space_shrink(glyph_advance);
+        } else {
+            ink_end = end; ink_width = width; ink_stretch = stretch; ink_shrink = shrink;
+        }
+        previous_word = word;
+    }
+    if (!s_vertical && end > ink_end && (s_text[end - 1] == ' ' || s_text[end - 1] == '\t')) {
+        if (resume == SIZE_MAX) resume = end;
+        end = ink_end; width = ink_width; s_line[end - visible_off] = 0;
     }
     line_runs_build(block, visible_off, end);
     *line_width = (int)width;
-    *next = end;
-    if (end < s_len && (s_text[end] == '\r' || s_text[end] == '\n')) {
-        *next = end + 1;
-        if (s_text[end] == '\r' && *next < s_len && s_text[*next] == '\n') (*next)++;
+    *next = resume == SIZE_MAX ? end : resume;
+    if (!s_vertical)
+        while (*next < limit && (s_text[*next] == ' ' || s_text[*next] == '\t')) ++*next;
+    if (*next < s_len && (s_text[*next] == '\r' || s_text[*next] == '\n')) {
+        size_t newline = *next;
+        *next = newline + 1;
+        if (s_text[newline] == '\r' && *next < s_len && s_text[*next] == '\n') (*next)++;
         *paragraph_end = !block || !block->line_break_after;
     }
     return *next > off;

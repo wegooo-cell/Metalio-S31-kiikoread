@@ -15,6 +15,18 @@
 #include "my_waveform_du.h"
 #include "my_waveform_gc.h"
 #include "my_waveform_gl.h"
+#if KIIKO_S31_DU14
+#include "my_waveform_du14.h"
+#endif
+
+const EpdWaveform* e0470_du14_waveform(void) {
+#if KIIKO_S31_DU14
+    return &MY_WAVEFORM_DU14;
+#else
+    return NULL;
+#endif
+}
+
 
 // 温度档 0-50°C。在此固件中没有温度分档的演示。
 // / One 0–50°C temp range. This firmware has no multi-range demo.

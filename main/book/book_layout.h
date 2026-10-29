@@ -16,6 +16,8 @@
 #include "html_text.h"
 
 /// 重排借用文本；空文一页，失败清空布局，超过 4096 页返回 false。/ Borrow and paginate; empty text has one page, failure clears layout, over 4096 pages fails.
+/// 横排优先整词换行；超长拉丁词按可用宽度补显示用连字符，不改原文字节，非词典音节断字。
+/// Horizontal Latin words wrap whole when possible; overlong tokens use width-based display-only hyphens, not dictionary syllabification, without changing source bytes.
 bool book_layout_build(const char* utf8, size_t len, EpdRect rect, int px);
 /// 借用块表；标题字号加8，块间单换行；原文与块表须存活至free。/ Borrow blocks; headings add 8 px, with one newline between blocks; text and blocks must outlive layout.
 bool book_layout_build_blocks(const char* utf8, size_t len, const blk_t* blocks, size_t count, EpdRect rect, int px);
@@ -42,10 +44,10 @@ void book_layout_set_reading_line_offset(int offset_px);
 /// 关闭插图时，排版跳过图片块，不为其保留页或正文空位。/ When false, omit image blocks without reserving pages or body space.
 void book_layout_set_images_visible(bool visible);
 /// 竖排：正文自上而下成列、列序自右向左，标点按竖排禁则处理，拉丁与括号转 90°，插图独占一页。
-/// 关闭时是原来的横排，排版与绘制一字未变；重排前调用。
+/// 关闭时使用横排（含英文整词换行）；重排前调用。
 /// Vertical setting: body runs down in columns ordered right to left, punctuation follows the
 /// vertical kinsoku rules, Latin and brackets turn 90°, and an illustration takes a page of its
-/// own. Off is the original horizontal setting, unchanged; call it before a re-layout.
+/// own. Off selects horizontal layout, including whole English words; call before a re-layout.
 void book_layout_set_vertical(bool vertical);
 bool book_layout_vertical(void);
 /// EPUB 章节首页预留标题区并跳过已经在题头显示的前置标题块；每章重排前调用。

@@ -16,6 +16,89 @@
 #include <stdbool.h>
 #include <string.h>
 
+// 仅追加目标白驱动及释放；源动作、灰阶、电压和扫描节拍不变。
+// Append changed-white drives and release holds without altering native actions, grays, voltage or cadence.
+typedef struct {
+    const EpdWaveform *source;
+    int mode;
+    unsigned white;
+    bool equal_white;
+    EpdWaveformPhases phases;
+    const EpdWaveformPhases *range;
+    EpdWaveformMode profile;
+    const EpdWaveformMode *profile_ptr;
+    EpdWaveform wave;
+} white_tail_t;
+static bool white_tail_build(white_tail_t *slot,const EpdWaveform *source,int mode,unsigned white,bool equal_white) {
+    const EpdWaveformPhases *original=e0470_waveform_phases(source,mode);
+    if(!original || !original->luts || original->phase_times || original->phases<14 ||
+       original->phases>52 || source->num_temp_ranges!=1 || !source->temp_intervals)return false;
+    const int count=original->phases+(int)white+2;
+    uint8_t (*data)[16][4]=heap_caps_malloc((size_t)count*16*4,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    if(!data)return false;
+    memcpy(data,original->luts,(size_t)original->phases*16*4);
+    memset(data+original->phases,0,(white+2)*16*4);
+    for(int f=original->phases;f<original->phases+(int)white;++f)
+        for(int from=0;from<(equal_white?16:15);++from)data[f][15][from/4]|=(uint8_t)(2u<<(6-2*(from%4)));
+    slot->mode=mode;slot->white=white;slot->equal_white=equal_white;
+    slot->phases=(EpdWaveformPhases){count,(const uint8_t*)data,NULL};
+    slot->range=&slot->phases;
+    slot->profile=(EpdWaveformMode){mode,1,&slot->range};
+    slot->profile_ptr=&slot->profile;
+    slot->wave=(EpdWaveform){.num_modes=1,.num_temp_ranges=1,
+        .mode_data=&slot->profile_ptr,.temp_intervals=source->temp_intervals};
+    slot->source=source;
+    return true;
+}
+static const EpdWaveform* main_quality_waveform(
+    const EpdWaveform* source,enum EpdDrawMode draw_mode,unsigned white_phases,bool equal_white
+) {
+#if KIIKO_S31_MAIN_CLEAN
+    enum { SLOTS=24 };
+    static white_tail_t slots[SLOTS];
+    const int mode=draw_mode&0x3f;
+    if(!source || (mode!=MODE_DU && mode!=MODE_GL16) ||
+       (white_phases!=6 && white_phases!=8))return source;
+    // 已派生的表先回到源再选力度，不能把六相、八相重复叠加。
+    // Rebase a derived input before selecting strength; never stack six/eight-phase tails.
+    for(unsigned i=0;i<SLOTS;++i)if(slots[i].source && &slots[i].wave==source){
+        if(slots[i].mode!=mode)return source;
+        source=slots[i].source;break;
+    }
+    for(unsigned i=0;i<SLOTS;++i)
+        if(slots[i].source==source && slots[i].mode==mode && slots[i].white==white_phases && slots[i].equal_white==equal_white)return &slots[i].wave;
+    unsigned index=0;
+    while(index<SLOTS && slots[index].source)++index;
+    if(index==SLOTS || !white_tail_build(&slots[index],source,mode,white_phases,equal_white))return source;
+    return &slots[index].wave;
+#else
+    (void)draw_mode;(void)white_phases;(void)equal_white;return source;
+#endif
+}
+const EpdWaveform* display_main_clean_waveform_with_phases(
+    const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases
+) { return main_quality_waveform(source,mode,white_phases,false); }
+// 只供主页快刷/水波纹切换：同样六/八相也维护等白，不叠加相位或驱动等黑/等灰。
+// Fast/ripple root switches only: the same six/eight phases also maintain equal whites, without stacking phases or driving equal black/grays.
+const EpdWaveform* display_main_background_waveform_with_phases(
+    const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases
+) { return main_quality_waveform(source,mode,white_phases,true); }
+const EpdWaveform* display_main_clean_waveform(const EpdWaveform* source,enum EpdDrawMode mode) {
+    return display_main_clean_waveform_with_phases(source,mode,6);
+}
+
+// 列表保留灰阶，整片背景补八相，下半区补十相；各自保留两相释放。
+// Lists retain grays with eight white-background drives, ten below, and two release phases each.
+static const EpdWaveform* settings_scroll_waveform(bool lower) {
+    static white_tail_t slots[2];
+    white_tail_t* slot=&slots[lower?1:0];
+    if(slot->source)return &slot->wave;
+    const EpdWaveform* source=display_main_normal_waveform();
+    return white_tail_build(slot,source,MODE_GL16,lower?10:8,true)?&slot->wave:source;
+}
+const EpdWaveform* display_settings_scroll_waveform(void) { return settings_scroll_waveform(false); }
+const EpdWaveform* display_settings_scroll_lower_waveform(void) { return settings_scroll_waveform(true); }
+
 // 主页切换及阅读图文出口显式使用；其他场景和原厂表保持原样。
 // Explicitly requested by root switches and reader image transitions; other scenes and vendor tables stay intact.
 // 两拍白向推动插在原最后两拍释放前；黑/灰目标只增加保持。
@@ -95,7 +178,7 @@ const EpdWaveform* display_main_gray_waveform(void) {
     }
     return &s_gray_waveform;
 }
-const EpdWaveform* display_main_bw_waveform(void) {
+static const EpdWaveform* display_main_reference_bw_waveform(void) {
     if(!s_bw_ready) {
         const EpdWaveformPhases *original=e0470_waveform_phases(&E0470_WAVEFORM,MODE_DU);
         if(!original||!original->luts||original->phases!=E0470_FULL_DU_FRAMES||original->phase_times)
@@ -107,6 +190,47 @@ const EpdWaveform* display_main_bw_waveform(void) {
     }
     return &s_bw_waveform;
 }
+// 实验只换纯黑白访问器；底栏的灰阶组合仍取原20相，原表和清理不变。
+// Only binary accessors switch in the experiment; gray footer synthesis keeps reference DU20 and cleanup tables stay intact.
+const EpdWaveform* display_main_bw_waveform(void) {
+#if KIIKO_S31_DU14
+    return e0470_du14_waveform();
+#else
+    return display_main_reference_bw_waveform();
+#endif
+}
+// 显式黑白维护出口保证逻辑上未变的白底也被擦到；保持14相和原扫描，不修改厂家静态表。
+// Explicit binary-maintenance outlets reach logically unchanged white; keep14 phases/cadence and never modify the supplied static table.
+const EpdWaveform* display_du14_white_waveform(void) {
+#if KIIKO_S31_DU14
+    enum { PHASES=14, WHITE_TAIL=3 };
+    static uint8_t data[PHASES][16][4];
+    static const EpdWaveformPhases phases={PHASES,(const uint8_t*)data,NULL};
+    static const EpdWaveformPhases *ranges[]={&phases};
+    static const EpdWaveformMode mode={MODE_DU,1,ranges};
+    static const EpdWaveformMode *modes[]={&mode};
+    static EpdWaveform wave={.num_modes=1,.num_temp_ranges=1,.mode_data=modes};
+    static bool ready;
+    if(!ready) {
+        const EpdWaveform *raw=e0470_du14_waveform();
+        const EpdWaveformPhases *original=e0470_waveform_phases(raw,MODE_DU);
+        if(!original||!original->luts||original->phases!=PHASES||original->phase_times||
+           raw->num_temp_ranges!=1||!raw->temp_intervals)return NULL;
+        memcpy(data,original->luts,sizeof(data));
+        // 内容区一次覆盖扫描时，已有黑字/灰色保持，不把厂家局部补黑扩大到整个页面。
+        // On the single content-area scan, hold existing black/gray instead of expanding local black reinforcement to the whole page.
+        for(int f=0;f<PHASES;++f) {
+            for(int v=0;v<15;++v)data[f][v][v/4]&=(uint8_t)~(3u<<(6-2*(v%4)));
+            data[f][15][3]=(uint8_t)((data[f][15][3]&~3u)|(f>=PHASES-WHITE_TAIL?2u:0u));
+        }
+        wave.temp_intervals=raw->temp_intervals;ready=true;
+    }
+    return &wave;
+#else
+    return NULL;
+#endif
+}
+
 // 条带引擎按GL16类型读取LUT，这里只包装原DU20相位指针，不生成新序列。
 // The band engine looks up GL16 LUTs; wrap the original DU20 phase pointer without generating a sequence.
 const EpdWaveform* display_main_bw_turn_waveform(void) {
@@ -136,7 +260,7 @@ const EpdWaveform* display_main_navigation_waveform(void) {
     static EpdWaveform wave={.num_modes=1,.num_temp_ranges=1,.mode_data=modes};
     static bool ready;
     if(ready)return &wave;
-    const EpdWaveformPhases *bw=e0470_waveform_phases(display_main_bw_waveform(),MODE_DU);
+    const EpdWaveformPhases *bw=e0470_waveform_phases(display_main_reference_bw_waveform(),MODE_DU);
     const EpdWaveformPhases *follow=e0470_waveform_phases(&E0470_FOLLOW_WAVEFORM,MODE_DU);
     if(!bw||!follow||!bw->luts||!follow->luts||bw->phase_times||follow->phase_times||
        bw->phases!=E0470_FULL_DU_FRAMES||follow->phases!=E0470_FOLLOW_FRAMES)
@@ -281,6 +405,7 @@ static const EpdWaveformMode s_page_gray_mode={5,1,s_page_gray_ranges};
 static const EpdWaveformMode *s_page_gray_modes[]={&s_page_gray_mode};
 static EpdWaveform s_page_gray_waveform={.num_modes=1,.num_temp_ranges=1,.mode_data=s_page_gray_modes};
 static bool s_page_gray_ready;
+#if !KIIKO_S31_DU14
 static uint8_t s_page_bw[E0470_FULL_DU_FRAMES][16][4];
 static const EpdWaveformPhases s_page_bw_phases={E0470_FULL_DU_FRAMES,(const uint8_t*)s_page_bw,NULL};
 static const EpdWaveformPhases *s_page_bw_ranges[]={&s_page_bw_phases};
@@ -288,6 +413,7 @@ static const EpdWaveformMode s_page_bw_mode={1,1,s_page_bw_ranges};
 static const EpdWaveformMode *s_page_bw_modes[]={&s_page_bw_mode};
 static EpdWaveform s_page_bw_waveform={.num_modes=1,.num_temp_ranges=1,.mode_data=s_page_bw_modes};
 static bool s_page_bw_ready;
+#endif
 const EpdWaveform* display_main_page_gray_waveform(void) {
     if(!s_page_gray_ready) {
         const EpdWaveformPhases *original=e0470_waveform_phases(&E0470_WAVEFORM,MODE_GL16);
@@ -300,7 +426,8 @@ const EpdWaveform* display_main_page_gray_waveform(void) {
     }
     return &s_page_gray_waveform;
 }
-const EpdWaveform* display_main_page_bw_waveform(void) {
+#if !KIIKO_S31_DU14
+static const EpdWaveform* display_main_reference_page_bw_waveform(void) {
     if(!s_page_bw_ready) {
         const EpdWaveformPhases *original=e0470_waveform_phases(&E0470_WAVEFORM,MODE_DU);
         if(!original||!original->luts||original->phases!=E0470_FULL_DU_FRAMES||original->phase_times)
@@ -315,6 +442,15 @@ const EpdWaveform* display_main_page_bw_waveform(void) {
         s_page_bw_waveform.temp_intervals=E0470_WAVEFORM.temp_intervals;s_page_bw_ready=true;
     }
     return &s_page_bw_waveform;
+}
+
+#endif
+const EpdWaveform* display_main_page_bw_waveform(void) {
+#if KIIKO_S31_DU14
+    return e0470_du14_waveform();
+#else
+    return display_main_reference_page_bw_waveform();
+#endif
 }
 
 // 仅面板实验借用官方11/5/0/3裁剪，保留灰阶尾和三相保持；原48相数组不动。

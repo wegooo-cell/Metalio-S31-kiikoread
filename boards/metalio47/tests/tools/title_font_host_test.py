@@ -11,7 +11,9 @@ from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
 font = (ROOT / 'main/assets/builtin.ttf').read_bytes()
-with tempfile.TemporaryDirectory(dir=ROOT / 'build') as folder:
+# 独立短路径防止宿主工程嵌套超过设备字段长度；不放宽字体/缓存断言。
+# Short independent host paths fit the device field without relaxing font/cache assertions.
+with tempfile.TemporaryDirectory(prefix='kiiko-s31-title-') as folder:
     work = Path(folder)
     (work / 'system.ttf').write_bytes(font)
     # 同一轮廓、不同字宽的字体可验证切页后确实采用新字体，而不是缓存上一份。
@@ -90,6 +92,39 @@ void ui_font_draw_title_px(uint8_t *fb,int x,int y,int px,const char *s,enum Epd
 static uint8_t pixels[400*200],preview_golden[400*200];
 static bool record_coverage;
 void epd_draw_pixel(int x,int y,uint8_t c,uint8_t *fb){assert(x>=0&&x<400&&y>=0&&y<200);if(record_coverage)fb[y*400+x]=c>>4;else{assert(c==0);fb[y*400+x]=1;}++painted;}
+// 用真实字体逐词独立绘制期望图：扩展只落在空格，词内字形位置保持不变。
+// Independently rasterize words with the real face: only spaces expand, preserving all within-word glyph positions.
+static void english_justification(void){
+ const int px=30,x=20,y=80;record_coverage=true;ttf_set_stroke_adjust(0);ttf_set_antialias(true);
+ for(int variant=0;variant<2;++variant)for(int words=2;words<=3;++words)for(int direction=-1;direction<=1;direction+=2){
+  const char *word=variant?"it’s":"red";char text[64],chunk[24];
+  snprintf(text,sizeof(text),words==2?"%s %s":"%s %s %s",word,word,word);
+  snprintf(chunk,sizeof(chunk),"%s ",word);
+  int natural=ttf_text_width_px(px,text),extra=direction<0?-1:5;
+  uint8_t expected[sizeof(pixels)];memset(expected,15,sizeof(expected));
+  int advance=ttf_text_width_px(px,chunk);
+  for(int index=0;index<words;++index)
+   ttf_draw_text_px(expected,x+index*(advance+extra),y,px,word,EPD_DRAW_ALIGN_LEFT,0,15);
+  memset(pixels,15,sizeof(pixels));
+  ttf_draw_text_px_fitted(pixels,x,y,px,text,0,natural+(words-1)*extra,0,15);
+  assert(!memcmp(pixels,expected,sizeof(pixels)));
+  // 过度撑宽退回原字距；不在无空格或不换行空格处强行拉开。
+  // Excessive expansion falls back; never stretch inside a word or across a nonbreaking space.
+  memset(expected,15,sizeof(expected));ttf_draw_text_px(expected,x,y,px,text,EPD_DRAW_ALIGN_LEFT,0,15);
+  memset(pixels,15,sizeof(pixels));
+  ttf_draw_text_px_fitted(pixels,x,y,px,text,0,natural+(words-1)*3*(ttf_text_width_px(px," ")/2)+1,0,15);
+  assert(!memcmp(pixels,expected,sizeof(pixels)));
+ }
+ const char *joined[]={"readers","red red","reader’s"};
+ for(unsigned i=0;i<sizeof(joined)/sizeof(joined[0]);++i){
+  uint8_t expected[sizeof(pixels)];memset(expected,15,sizeof(expected));
+  ttf_draw_text_px(expected,x,y,px,joined[i],EPD_DRAW_ALIGN_LEFT,0,15);
+  memset(pixels,15,sizeof(pixels));
+  ttf_draw_text_px_fitted(pixels,x,y,px,joined[i],0,ttf_text_width_px(px,joined[i])+6,0,15);
+  assert(!memcmp(pixels,expected,sizeof(pixels)));
+ }
+ record_coverage=false;
+}
 int main(int argc,char **argv){
  assert((argc==3||argc==4)&&ttf_get_antialias());const char *text="字体设置";unsigned widths[2];
  for(int face=0;face<2;++face){
@@ -127,6 +162,7 @@ int main(int argc,char **argv){
    assert(!memcmp(actual,pixels,sizeof(pixels))&&opens==initial_opens&&active_fd==1);
   }
   ui_scale=100;ui_text_set_system_scale(!face);
+  english_justification();
   // Static imported faces must respond too, without changing advances or native normal strokes.
   int native_width=ttf_text_width_px(48,text),axis=ttf_get_weight();
   uint8_t native_mask[300*100],weighted[300*100];
@@ -226,7 +262,7 @@ int main(int argc,char **argv){
  }
  ttf_font_unload();assert(!active_fd&&!ttf_font_ready()&&!ttf_font_has_text(text));
  puts("PASS: missing/EMFILE/corrupt/OOM target returns failure and restores old face;30 preview cycles have no transient memory/FD leak; full embedded slots preserved");
- puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, five stroke levels with native normal identity and fixed advances, single file/face, bounded warm cache and no duplicate font load");
+ puts("PASS: actual imported system/reader TTF at 32/40/48px, direct raster identity, five stroke levels with native normal identity and fixed advances, English word-space raster alignment/bounded expansion, single file/face, bounded warm cache and no duplicate font load");
 }
 '''
     helper='static void copy_text(char *to,size_t cap,const char *from){snprintf(to,cap,"%s",from);}'+'\n'+function('draw_reading_font_name',ROOT/'main/apps/app_book.c')+'\n'

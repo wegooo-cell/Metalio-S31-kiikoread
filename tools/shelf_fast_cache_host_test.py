@@ -48,6 +48,8 @@ typedef struct {int x,y,width,height;} EpdRect;
 typedef struct {unsigned x,y,width,height;} book_crop_t;
 enum {SHELF,MANAGE};
 static int s_view=SHELF,rows=9,contrast=100,phase_shift,style=2;
+static unsigned s_cover_generation;
+static void book_cover_jobs_cancel(unsigned g){(void)g;}
 static bool fast=true,alloc_fail;
 static size_t free_psram=4*1024*1024,allocated_bytes;
 static void release_guard_cache(void){}
@@ -156,6 +158,10 @@ int main(void) {
         midgray+=ui_image_dither_cover_bw(128,x,y)==0;
     }
     assert(black==15 && midgray==8);
+    invalidate_covers();style=6;rows=9;free_psram=4*1024*1024;
+    for(int i=0;i<9;++i)seed_gray(i);prepare_fast_covers();assert(allocated_bytes==40446);
+    for(int row=0;row<9;++row)verify_bitmap(row);
+    before=allocations;for(int i=0;i<80;++i)prepare_fast_covers();assert(allocations==before);
     invalidate_covers();style=5;rows=4;
     for(int i=0;i<4;++i){seed_gray(i);s_covers[i].width=i==0?176:i==1?70:160;s_covers[i].height=i==0?100:i==1?240:160;}
     prepare_fast_covers();assert(allocated_bytes==4u*4494);

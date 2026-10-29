@@ -17,7 +17,22 @@ const EpdWaveform* display_main_bw_waveform(void);
 /// Ordinary gray-edge interleaving keeps endpoints/phase counts/pulse counts; OOM falls back to original soft grays.
 const EpdWaveform* display_main_normal_waveform(void);
 
+/// 板级根页清残影：保留原动作并补变白及释放，分配失败回退原表；各板使用各自相位预算。
+/// Board root cleanup retains original actions and adds white/release phases within each board's own budget, with safe allocation fallback.
+const EpdWaveform* display_main_clean_waveform(const EpdWaveform* source, enum EpdDrawMode mode);
+
+/// 板级根页按来源/目标选择六或八相变白；缓存区分力度且不叠加，分配失败保留原表。
+/// Board roots select six/eight changed-white phases; strength-keyed bounded caches never stack; OOM retains the source.
+const EpdWaveform* display_main_clean_waveform_with_phases(
+    const EpdWaveform* source, enum EpdDrawMode mode, unsigned white_phases
+);
+
 #if KIIKO_BOARD_METALIO47
+/// S31快刷/水波纹根页同轮维护所有目标白；六/八相预算不变，等黑/等灰不新增推动。
+/// S31 fast/ripple roots maintain all white targets in the same six/eight-phase budget without new equal-black/gray drives.
+const EpdWaveform* display_main_background_waveform_with_phases(
+    const EpdWaveform* source,enum EpdDrawMode mode,unsigned white_phases);
+
 #include <stdbool.h>
 /// 仅主页切换及阅读图文出口显式调用：变化为白的像素增加两拍，保留原序列与释放尾段。
 /// Explicit root-switch/reader-image outlets add two white drives on changed white targets, retaining original actions and release phases.
@@ -31,6 +46,9 @@ const EpdWaveform* display_main_shelf37_waveform(bool art);
 const EpdWaveform* display_reader_panel37_waveform(void);
 /// 用原DU20相位供已有条带动画读取；仅适配mode元数据。/ Expose original DU20 phases to the existing band engine; adapt mode metadata only.
 const EpdWaveform* display_main_bw_turn_waveform(void);
+/// S31十四相黑白维护：等白末三相补白，其他等值保持，迁移及总相数不变；未启用返回NULL。
+/// S31 DU14 binary maintenance: maintain equal whites in the last three phases, hold other equals, retain changed transitions/count; NULL when disabled.
+const EpdWaveform* display_du14_white_waveform(void);
 /// 底栏灰底轻量恢复：原DU20端点、白底FOLLOW灰推，非白先擦白，等灰保持；不改原厂表。
 /// Quiet navigation restore: vendor DU20 endpoints, FOLLOW grays from white, whiten nonwhite origins first, hold equals; vendor tables remain intact.
 const EpdWaveform* display_main_navigation_waveform(void);
@@ -53,11 +71,14 @@ const EpdWaveform* display_main_page_bw_waveform(void);
 #else
 #endif
 
-#if KIIKO_BOARD_METALIO47
-#else
-/// 设置滚动使用已有八相灰阶差分，只向目标推动；不二值化字缘，不申请额外波形内存。
-/// Settings scrolling uses existing eight-phase directional gray differences, without thresholding glyph edges or allocating another waveform.
+/// 设置滚动用各板原生灰阶加强擦白：S31为48+8+2，Pico为37+8；保留字缘和头像灰阶。
+/// Board-owned list cleanup retains glyph/avatar grays: S31 uses48+8+2, Pico uses37+8.
 const EpdWaveform* display_settings_scroll_waveform(void);
+#if KIIKO_BOARD_METALIO47
+/// S31列表下半区十相背景擦白及两相释放。/ S31 lower list: ten white-background drives and two release phases.
+const EpdWaveform* display_settings_scroll_lower_waveform(void);
+#endif
+#if !KIIKO_BOARD_METALIO47
 /// 系统底色恢复原完整柔和灰阶，白底同向擦除；底栏由调用方裁剪保护，不改原始波形。
 /// Restore complete original soft system grays with directional white erasure; callers crop navigation and vendor tables remain intact.
 const EpdWaveform* display_main_ui_waveform(void);
