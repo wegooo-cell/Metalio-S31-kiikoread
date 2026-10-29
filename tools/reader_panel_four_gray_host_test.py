@@ -23,6 +23,8 @@ unit=r'''
 #define H 684
 #define B (W*H/2)
 static uint8_t front[B],expected[B],back[B],saved[B];
+// 此夹具只验证四灰控件；GL37真实分配由专项测试负责。/ This fixture owns four-gray controls; dedicated tests own real GL37 allocation.
+const EpdWaveform* display_reader_panel37_waveform(void){return NULL;}
 static enum EpdRotation rotation;
 int epd_width(void){return W;}
 int epd_height(void){return H;}

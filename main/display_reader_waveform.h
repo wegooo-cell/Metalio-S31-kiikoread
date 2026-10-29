@@ -8,8 +8,12 @@
 const EpdWaveform* display_reader_text_waveform(void);
 
 #include "epd_highlevel.h"
-/// 速读复用各板原厂DU相位：Pico用MODE_DU，S31使用批量接口别名。/ Fast BW retains board-native DU phases: MODE_DU on Pico, batch-mode alias on S31.
+/// Pico速读保留原厂DU；S31保留所选DU原序，定稿前追加四相目标白，使用批量模式别名。
+/// Pico FastBW retains native DU; S31 retains the selected DU order, inserts four white-target phases before settling and aliases the batch mode.
 const EpdWaveform* display_reader_fast_text_waveform(void);
+/// S31普通保留Moku的GL37加六相目标白（含等白），黑/灰等值保持，末尾定稿；无GL37时保留灰阶回退。
+/// S31 ordinary retains Moku's GL37 plus six white-target phases including equal whites, holding equal black/grays and settling last; retain gray fallback without GL37.
+const EpdWaveform* display_reader_soft_turn_waveform(void);
 /// 只归一文字区域目标，保留真实back和区域外灰阶。/ Normalize only the text target, retaining real history and outside grays.
 bool display_reader_fast_text_prepare(EpdiyHighlevelState* hl,EpdRect area);
 

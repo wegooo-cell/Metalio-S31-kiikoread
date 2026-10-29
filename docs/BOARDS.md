@@ -315,3 +315,13 @@ S31 SDMMC沿用Metalio官方内部DMA中转：固定4096字节内部对齐缓冲
 S31正常待机后继续恢复TF上的字体与书籍句柄；临时读卡/内存失败按1、3、10、30秒间隔重试，成功手动加载可清除旧拒绝记录。已判定无效的字体仍限制自动重试，异常启动仍使用内建字库，不覆盖保存的选择。字体列表最多128款，按实际路径区分文件，标签按完整UTF-8字符截短并区分重名；仅收录`.ttf`和`.otf`，扩展名不代表所有内部格式都支持。原本超过设置路径容量的文件名才会缩短并附校验标识，保留字体内容、避开已有文件。字体上传自动规范化不适合FAT的符号，其他上传类型的路径检查保持原样。
 
 S31 resumes pending SD font/book handles after normal standby. Transient I/O/OOM failures retry after1/3/10/30seconds; a successful manual load clears old rejection. Invalid faces still limit automatic retries, and abnormal-start protection retains built-in fonts without changing saved choices. The128-entry catalogue identifies actual paths, keeps UTF-8 labels valid and distinguishes duplicates. Only `.ttf`/`.otf` are listed; extensions do not guarantee support for every outline format. Only names exceeding persisted-path capacity are shortened with a hash, retaining font bytes and avoiding existing files. Font uploads normalize FAT-incompatible symbols; other upload path checks remain unchanged.
+
+## S31阅读差分更新（2026-10-29） / S31 reader differences
+
+本次S31产品构建显式启用`--s31-reader-panel37`，CI同样覆盖该档。普通文字、图文及离图页原样采用Moku PR6的GL37加六相目标白，共43相、16级灰阶；六相包含原本已白的区域，黑/灰等值不重驱。水波纹继续原独立出口；手动及周期清理保留GC48。GL37关闭或分配失败时，完整GL48保留全部非等值迁移，追加六相目标白和三相保持，共57相，避免回到重驱等黑/灰的原表。
+
+速读黑白独立量化目标，使用本板所选DU完整相序再加四相目标白；原表有尾部保持时将四相插在其前。默认DU20共24相，带DU14实验的本地构建共18相；不改首页DU14白底维护、原表数据、VCOM、供电或扫描时钟。实际光学速度、白底闪动和残影需实屏比较；相数并非总响应时间。
+
+S31 builds and CI explicitly enable `--s31-reader-panel37`. Ordinary text/image/exits retain Moku PR6's exact GL37 plus six white-target phases:43 phases,16 grays,including equal whites while equal black/grays hold. Ripple keeps its own outlet and manual/periodic cleanup keeps GC48. With GL37 disabled or allocation failure, retain every changed GL48 transition plus six whites and three release holds,57 phases,without re-driving equal black/grays.
+
+FastBW independently quantizes targets and retains the selected native DU sequence plus four white-target phases,inserted before existing trailing holds. NativeDU20 totals24; a local DU14 experiment totals18. Root DU14 maintenance,vendor tables,VCOM,power and clocks stay separate. Optical timing/flash/ghosting still require hardware comparison; phase count is not total latency.

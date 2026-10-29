@@ -18,6 +18,8 @@
  * User revision 2026-10-21: Pico reader entry uses one complete GC16; ordinary text retains calibrated GL16 erasure and equal-gray holds, prefetch and one fused progress output.
  * 用户2026-10-24修订：S31图文页和离图翻页同色保持，黑白端点单向推动；实际灰阶迁移保留完整GL48，仅黑白变化走DU20；进度合并，手动/周期清理仍完整GC48。
  * User revision 2026-10-24: S31 image turns/exits hold equal pixels and drive BW endpoints directionally; real gray changes retain complete GL48 while BW-only changes use DU20, with fused progress and manual/periodic GC48.
+ * 用户2026-10-29修订：S31普通/图文沿用Moku GL37加六相白；速读独立DU加四相白，水波纹和GC48清理保持独立。
+ * User revision2026-10-29: S31 ordinary/image turns retain Moku GL37 plus six whites; FastBW separately uses DU plus four whites, with independent ripple and GC48 cleanup.
  * 用户修订：正文中间双击固定切换全屏，单击左右各半或上1/3下2/3翻页，不受按键配置影响。
  * 三键单击及中键长按可自定义，提供翻页/工具栏及首页/全屏/工具栏两套推荐；中键长按默认返回主页，阅读页不画右下角菜单图标。
  * 用户2026-10-24修订：S31阅读音量上/下键固定上一页/下一页，与底部键自定义独立。
@@ -4240,7 +4242,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             if (s_reader_fullscreen) image_area = ui_rect_union(image_area, reader_fullscreen_progress_area());
             else if (s_reader_footer_pending) image_area = ui_rect_union(image_area, progress_rect());
         }
-        err = update_display_gray_transition(ctx->hl, image_area);
+        // 章首/图文页也走同一套柔和差分：只推变化像素、整屏一次输出，不再走整页灰阶过渡。
+        // Chapter-start/image pages use the same soft difference: changed pixels only,
+        // one whole-panel output instead of a full-page gray transition.
+        (void)image_area;
+        err = update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(),
+                                             MODE_GL16,
+                                             (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT});
     }
 #else
     else if (image_gray_refresh && redraw == APP_REDRAW_AREA && !s_reader_cleanup && s_presented_view == (int)READING) {
@@ -4315,8 +4323,13 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             ? update_display_water_turn(ctx->hl, s_area, s_water_turn_dir)
 #endif
 #if KIIKO_BOARD_METALIO47
+            : s_reader_turn_pending && s_mode==MODE_GL16 && app_settings_reader_turn_effect()==2
+                ? update_display_text_turn(ctx->hl,turn_area,E0470_TURN_RTL)
             : s_reader_turn_pending && s_mode==MODE_GL16
-                ? update_display_text_turn(ctx->hl, turn_area, E0470_TURN_RTL)
+                // 普通采用Moku六相目标白方案；速读由上方独立DU出口保留。
+                // Ordinary retains Moku's six white-target phases; the separate DU outlet above preserves FastBW.
+                ? update_display_area_diff_with(ctx->hl, display_reader_soft_turn_waveform(), s_mode,
+                                                (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT})
 #else
             : s_reader_turn_pending && s_mode == MODE_GL16 && app_settings_reader_turn_effect() == 2 &&
               s_view == READING && s_presented_view == (int)READING &&
@@ -4331,7 +4344,8 @@ static bool present(app_ctx_t* ctx, app_redraw_t redraw) {
             : (s_reader_fullscreen || s_reader_turn_pending) && s_mode == MODE_GL16
                 ? update_display_area_diff_with(ctx->hl,
 #if KIIKO_BOARD_METALIO47
-                    s_reader_turn_pending ? display_reader_text_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
+                     display_reader_soft_turn_waveform(), s_mode,
+                     s_reader_turn_pending ? (EpdRect){0, 0, UI_LOCK_WIDTH, UI_LOCK_HEIGHT} : turn_area)
 #else
                     s_reader_turn_pending ? display_main_gray_waveform() : &E0470_WAVEFORM, s_mode, turn_area)
 #endif

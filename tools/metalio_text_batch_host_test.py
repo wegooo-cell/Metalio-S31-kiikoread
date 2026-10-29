@@ -55,6 +55,7 @@ static enum EpdRotation rotation;static int calls,scans,fail_at,mask_calls,first
 static unsigned phase_hits[64];static int64_t now;
 static bool expect_staged;static const uint8_t*staged_test_luts[1];static int8_t staged_test_lines[H];
 int water_test_alloc_fail=1;
+const EpdWaveform* display_reader_panel37_waveform(void){return NULL;}
 int epd_width(void){return W;}int epd_height(void){return H;}
 enum EpdRotation epd_get_rotation(void){return rotation;}
 EpdRect epd_full_screen(void){return(EpdRect){0,0,W,H};}
@@ -191,21 +192,20 @@ int main(void){
   assert(calls==1&&scans==fail&&!memcmp(back,saved,BYTES));
  }}
  puts("PASS: ordinary shares actual ripple22-phase generator/quantizer,all256 target/history pairs,one batch,every active/tail phase,all22 failure ticks/four rotations retain history");
- // 速读使用原厂DU20原数据，量化只改目标，不改实际旧帧或区域外像素。
- // Fast text uses the exact vendor DU20 data, changing only the target crop and never old history/outside pixels.
+ // 原DU20完整相序加四相白，原尾部保持不丢；目标量化不改历史。/ Complete DU20 plus four whites, original tail holds and real history retained.
  const EpdWaveform*fast=display_reader_fast_text_waveform();
  const EpdWaveformPhases*du=e0470_waveform_phases(fast,MODE_GL16);
- assert(du==e0470_waveform_phases(&E0470_FULL_WAVEFORM,MODE_DU)&&du->phases==20);
+ assert(du&&du->phases==24);
  for(int from=0;from<16;++from)for(int to=0;to<16;++to){
   rotation=EPD_ROT_INVERTED_PORTRAIT;memset(front,to|(to<<4),BYTES);memset(back,from|(from<<4),BYTES);
   memcpy(saved,back,BYTES);reset();fail_at=0;
   assert(display_reader_fast_text_prepare(&hl,logical())&&!memcmp(back,saved,BYTES));
   int target=to<8?0:15;for(size_t i=0;i<BYTES;++i)assert(front[i]==(target|(target<<4)));
-  int first=0;while(first<20&&!e0470_phase_action(du,first,target,from))++first;
-  int skip=first==20?19:first?first-1:0;
+  int first=0;while(first<24&&!e0470_phase_action(du,first,target,from))++first;
+  int skip=first==24?23:first?first-1:0;
   assert(e0470_text_turn_with_waveform(&hl,logical(),E0470_TURN_RTL,fast)==EPD_DRAW_SUCCESS);
-  assert(calls==1&&first_seen==skip&&scans==20-skip&&!memcmp(front,back,BYTES));
-  for(int f=0;f<20;++f){assert(phase_hits[f]==(unsigned)(f>=skip));if(f<skip)assert(!e0470_phase_action(du,f,target,from));}
+  assert(calls==1&&first_seen==skip&&scans==24-skip&&!memcmp(front,back,BYTES));
+  for(int f=0;f<24;++f){assert(phase_hits[f]==(unsigned)(f>=skip));if(f<skip)assert(!e0470_phase_action(du,f,target,from));}
  }
  static uint8_t before_front[BYTES];
  for(int rot=0;rot<4;++rot){rotation=rot;
@@ -221,7 +221,7 @@ int main(void){
   for(int y=0;y<H;++y)for(int x=0;x<W;++x){size_t i=(size_t)y*W/2+x/2;int shift=(x&1)*4;
    int old=(before_front[i]>>shift)&15;bool in=x>=px&&x<px+pw&&y>=py&&y<py+ph;
    assert(((front[i]>>shift)&15)==(in?(old<8?0:15):old));}
-  for(int fail=1;fail<=20;++fail){
+  for(int fail=1;fail<=24;++fail){
    memset(front,0,BYTES);memset(back,255,BYTES);memcpy(saved,back,BYTES);reset();fail_at=fail;
    assert(e0470_text_turn_with_waveform(&hl,logical(),E0470_TURN_RTL,fast)==EPD_DRAW_EMPTY_LINE_QUEUE);
    assert(calls==1&&scans==fail&&!memcmp(back,saved,BYTES));
@@ -231,7 +231,7 @@ int main(void){
  memcpy(saved,back,BYTES);memcpy(before_front,front,BYTES);
  assert(!display_reader_fast_text_prepare(&hl,(EpdRect){INT32_MAX,INT32_MAX,INT32_MAX,INT32_MAX}));
  assert(!memcmp(saved,back,BYTES)&&!memcmp(before_front,front,BYTES));
- puts("PASS: exact native DU20 alias,all256 target/history transitions,one batch,complete active/tail phases,four rotations/odd crops,every failed phase preserves history,no out-of-crop quantization");
+ puts("PASS: native DU20 plus four whites and retained settling,all256 target/history transitions,one batch,complete active/tail phases,four rotations/odd crops,every failed phase preserves history,no out-of-crop quantization");
  // 入场26相包括原来完全相同的中灰；灰色滑条统一白基线，区域外半字节不得驱动。
  // Entry26 includes identical midgrays, giving gray controls one white baseline without driving neighboring nibbles.
  const EpdWaveform *panel=display_reader_panel_gray4_waveform(true);assert(panel);

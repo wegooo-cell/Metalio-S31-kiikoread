@@ -2,6 +2,8 @@
 
 ## 未发布 / Unreleased
 
+- S31普通/图文阅读沿用Moku的GL37加六相白，进度同轮输出；速读保留独立黑白DU，并在原定稿前追加四相白。GL37不可用时保持灰阶回退、等黑/灰保护与末尾定稿，手动/周期GC48不变。
+  S31 ordinary/image turns retain Moku GL37 plus six whites and fused progress; FastBW independently retains DU with four added whites before its original settling. Preserve gray fallback/equal black-gray holds/settling without GL37 and retain manual/periodic GC48.
 - 两机同步：改进书名、作者与已知来源后缀识别，清理重复作者、译者和冗余宣传尾注；保留原文件及操作完整路径，阅读进度不变。
   Both boards: refine title/author and known source suffix recognition without renaming files or changing reading progress; file actions retain complete paths.
 - Pico构建对齐现有rc101的字体路径保护、黑白设置开关、白底密码框、可选密码宽限期和标题提示排版；宿主夹具按机型选择，S31电源与显示后端保持独立。
