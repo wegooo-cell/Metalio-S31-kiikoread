@@ -770,11 +770,18 @@ static void settings_fit_text(char *value, int px, int width) {
 static void fit_value(char *value, int width) { settings_fit_text(value,20,width); }
 
 static void settings_switch(uint8_t *fb, int center_y, bool active) {
+    // 灰色轨道在滚动差分扫描下会经过深色相位产生黑闪；纯黑白无灰阶过渡，任何刷新模式都稳定。
+    // A gray track transits dark phases under the scroll's differential scan and flashes
+    // black; pure black/white holds clean in every refresh mode.
     EpdRect track = {555, center_y - 19, 69, 39};
-    ui_fill_round_rect(fb, track, 19, active ? 0x58 : 0xc4);
+    if (active) ui_fill_round_rect(fb, track, 19, UI_GRAY_BLACK);
+    else {
+        ui_fill_round_rect(fb, track, 19, UI_GRAY_WHITE);
+        ui_draw_round_rect(fb, track, 19, 0x30);
+    }
     int cx = active ? track.x + 49 : track.x + 20;
     epd_fill_circle(cx, track.y + 19, 16, UI_GRAY_WHITE, fb);
-    epd_draw_circle(cx, track.y + 19, 16, 0x78, fb);
+    epd_draw_circle(cx, track.y + 19, 16, 0x30, fb);
 }
 
 static void setting_group(uint8_t *fb, int title_y, const char *title,
@@ -889,9 +896,15 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         else if (lock_pin_enabled()) {
             row(fb, 406, "修改密码", "验证原密码  ›");
             row(fb, 512, "关闭密码", "验证原密码  ›");
+            // 宽限期：锁屏后该时间内唤醒/开机免密；点按在 关闭/5分钟/1小时/8小时/24小时 间循环。
+            // Grace: wakes inside the window skip the PIN; tapping cycles off/5min/1h/8h/24h.
+            const unsigned grace = app_settings_pin_grace_code();
+            const char *grace_text = grace == 1 ? "5 分钟" : grace == 2 ? "1 小时" :
+                grace == 3 ? "8 小时" : grace == 4 ? "24 小时" : "关闭";
+            row(fb, 618, "解锁宽限期", grace_text);
         } else row(fb, 406, "开启密码", "设置四位密码  ›");
-        if (s_notice[0]) ui_text_vc(fb, 342, 680, 23, s_notice, EPD_DRAW_ALIGN_CENTER, false);
-        ui_text_vc(fb, 342, 752, 21, "修改和关闭密码需验证原密码", EPD_DRAW_ALIGN_CENTER, false);
+        if (s_notice[0]) ui_text_vc(fb, 342, 730, 23, s_notice, EPD_DRAW_ALIGN_CENTER, false);
+        ui_text_vc(fb, 342, 800, 21, "修改和关闭密码需验证原密码", EPD_DRAW_ALIGN_CENTER, false);
         settings_navigation(fb); return;
     }
     if (s_page == SETTINGS_PROFILE) {
@@ -1445,7 +1458,16 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     ui_fill_rect_fast((EpdRect){0,0,UI_LOCK_WIDTH,160},UI_GRAY_WHITE,fb);
     ui_nav_status(fb);
     ui_text(fb, 36, 91, 52, "设置", EPD_DRAW_ALIGN_LEFT, false);
-    if (s_notice[0]) ui_text_fixed_vc(fb, 36, 138, 20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    if (s_notice[0]) {
+        // 提示移到「设置」标题右侧同一行、中心对齐标题墨迹跨度中点（基线与上下沿实测，任何字体同轨）：
+        // 自导入的大字面字体不再与标题或下方列表互相压住——原 y=138 的固定间距按内置字体预留。
+        // The notice shares the title's row, centred on the title's measured ink span: tall
+        // imported faces no longer collide with the title or the list below — the fixed y=138 gap
+        // was reserved for the built-in face.
+        const int notice_x = 36 + 2 * ui_text_effective_px(52) + 24;
+        ui_text_fixed_vc(fb, notice_x, ui_text_ink_center_y(91, 52, "设置"),
+                         20, s_notice, EPD_DRAW_ALIGN_LEFT, false);
+    }
     settings_navigation(fb);
 }
 
@@ -1809,6 +1831,11 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
          (lock_pin_enabled() && ui_rect_hit((EpdRect){36,512,612,70},ev->x0,ev->y0)))) {
         if (ctx->now_ms < s_pin_retry_at) { snprintf(s_notice, sizeof(s_notice), "请等待后重试"); return APP_REDRAW_PAGE; }
         pin_setup_open(ctx, ev->y0 >= 512); return APP_REDRAW_PAGE;
+    }
+    if (s_page == SETTINGS_LOCK_PIN && ev->type == UI_GESTURE_TAP && lock_pin_enabled() &&
+        ui_rect_hit((EpdRect){36, 606, 612, 84}, ev->x0, ev->y0)) {
+        app_settings_set_pin_grace_code((app_settings_pin_grace_code() + 1) % 5);
+        return APP_REDRAW_PAGE;
     }
 
     if (s_page == SETTINGS_BOOT) {

@@ -39,6 +39,8 @@
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
+#define NVS_KEY_PIN_GRACE "pin_grace"
+#define NVS_KEY_PIN_LOCK_AT "pin_lck_at"
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
@@ -93,6 +95,8 @@
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
 static uint8_t s_wake_presses = 1;
+static uint8_t s_pin_grace_code_v;  // 0-4 档位码，NVS 存码不存分钟 / 0-4 step code, NVS stores the code not minutes
+static uint32_t s_pin_locked_at;    // 最近一次带密码锁屏的 unix 秒 / last PIN-enabled lock, unix seconds
 static bool s_home_full_refresh;
 static app_home_component_t s_home_component = APP_HOME_FOLDER;
 static uint8_t s_home_goal_minutes = 30;
@@ -144,6 +148,7 @@ static uint8_t s_shelf_style = 2;
 static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
+static void nvs_put_u32(const char* key, uint32_t value);
 
 static bool valid_media_dir(const char* path) {
     if (!path || strncmp(path, "/sdcard/", 8) || !path[8] ||
@@ -200,6 +205,14 @@ void app_settings_init(void) {
     raw = 1;
     if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
     s_wake_presses = raw;
+    raw = 0;
+    s_pin_grace_code_v = 0;
+    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK && raw <= 4) s_pin_grace_code_v = raw;
+    s_pin_locked_at = 0;
+    {
+        uint32_t locked_at = 0;
+        if (nvs_get_u32(h, NVS_KEY_PIN_LOCK_AT, &locked_at) == ESP_OK) s_pin_locked_at = locked_at;
+    }
     raw = 0;
     if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
     raw = 0;
@@ -403,6 +416,27 @@ void app_settings_set_wake_presses(uint8_t presses) {
     s_wake_presses = presses;
     nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);
 }
+// 密码宽限期：档位码存储避免分钟值超出 u8；480/1440 装不进去。
+// PIN grace: the step code avoids minute values that no longer fit a u8.
+uint8_t app_settings_pin_grace_code(void) { return s_pin_grace_code_v; }
+void app_settings_set_pin_grace_code(uint8_t code) {
+    if (code > 4) code = 0;
+    if (code == s_pin_grace_code_v) return;
+    s_pin_grace_code_v = code;
+    nvs_put_u8(NVS_KEY_PIN_GRACE, code);
+}
+unsigned app_settings_pin_grace_minutes(void) {
+    static const unsigned minutes[5] = {0, 5, 60, 480, 1440};
+    return s_pin_grace_code_v < 5 ? minutes[s_pin_grace_code_v] : 0;
+}
+uint32_t app_settings_pin_locked_at(void) { return s_pin_locked_at; }
+void app_settings_record_pin_lock(uint32_t unix_seconds) {
+    // 时钟无效不记录，判定端安全回落要密码。/ An invalid clock records nothing; the check falls back to the PIN.
+    if (unix_seconds < 1704067200) return;
+    if (unix_seconds == s_pin_locked_at) return;
+    s_pin_locked_at = unix_seconds;
+    nvs_put_u32(NVS_KEY_PIN_LOCK_AT, unix_seconds);
+}
 
 app_home_component_t app_settings_home_component(void) { return s_home_component; }
 uint8_t app_settings_home_goal_minutes(void) { return s_home_goal_minutes; }
@@ -540,6 +574,14 @@ static void nvs_put_u8(const char* key, uint8_t value) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_u8(h, key, value);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void nvs_put_u32(const char* key, uint32_t value) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u32(h, key, value);
     nvs_commit(h);
     nvs_close(h);
 }

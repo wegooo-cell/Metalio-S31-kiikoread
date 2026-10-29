@@ -69,6 +69,8 @@ jobs:
           python3 tools/boot_panel_actions_host_test.py
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py
+          python3 tools/font_picker_catalog_host_test.py
+          python3 tools/font_catalog_host_test.py
           python3 tools/power_double_click_host_test.py
           python3 tools/pico_wake_option_host_test.py
           python3 tools/pico_lock_hint_host_test.py
@@ -141,6 +143,7 @@ jobs:
           python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/host/${{ matrix.board }}
           cd build/host/${{ matrix.board }}
           mkdir -p build/book-tests/settings-card
+          python3 tools/file_names_host_test.py
           python3 tools/reading_settings_host_test.py
           python3 tools/reader_controls_host_test.py
           python3 tools/reader_ui_scale_host_test.py

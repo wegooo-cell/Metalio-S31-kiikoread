@@ -59,7 +59,8 @@ retrieve_line_isr(RenderContext_t* ctx, uint8_t* buf) {
 }
 
 /// start the next frame in the current update cycle
-static void IRAM_ATTR handle_lcd_frame_done(RenderContext_t* ctx) {
+static void IRAM_ATTR handle_lcd_frame_done(void* payload) {
+    RenderContext_t* ctx = (RenderContext_t*)payload;
     epd_lcd_frame_done_cb(NULL, NULL);
     epd_lcd_line_source_cb(NULL, NULL);
 
@@ -79,7 +80,7 @@ void lcd_do_update(RenderContext_t* ctx) {
     epd_set_mode(1);
 
     for (uint8_t k = 0; k < ctx->cycle_frames; k++) {
-        epd_lcd_frame_done_cb((frame_done_func_t)handle_lcd_frame_done, ctx);
+        epd_lcd_frame_done_cb(handle_lcd_frame_done, ctx);
         prepare_context_for_next_frame(ctx);
 
         // start both feeder tasks
@@ -173,7 +174,7 @@ void epd_push_pixels_lcd(RenderContext_t* ctx, short time, int color) {
     assert(ctx->static_line_buffer != NULL);
 
     push_pixels_populate_line(ctx, color);
-    epd_lcd_frame_done_cb((frame_done_func_t)handle_lcd_frame_done, ctx);
+    epd_lcd_frame_done_cb(handle_lcd_frame_done, ctx);
     epd_lcd_line_source_cb((line_cb_func_t)&push_pixels_isr, ctx);
 
     epd_set_mode(1);

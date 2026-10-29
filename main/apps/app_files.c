@@ -197,6 +197,14 @@ static bool is_book_path(const char *path) {
     return ext && (!strcasecmp(ext, ".epub") || !strcasecmp(ext, ".txt"));
 }
 
+// 列表只取简短书名和作者，非书籍与详情继续用原基名；没有额外TF读取。
+// List rows use short book titles/authors; other files and details keep the real basename, with no extra SD IO.
+static void file_display_name(const file_item_t *item,char title[128],char author[128]) {
+    author[0]=0;
+    if(!item->is_dir&&is_book_path(item->path)&&book_name_from_path(item->path,title,128,author,128))return;
+    copy_utf8(title,128,file_item_name(item));
+}
+
 static bool sibling_path(const char *name, char out[288]) {
     const char *slash = strrchr(s_selected.path, '/');
     if (!slash || strchr(name, '/') || strchr(name, '\\') || strchr(name, ':')) return false;
@@ -627,7 +635,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             int index = s_page * visible_rows() + row;
             if (index >= s_count) break;
             int y = 214 + row * 88;
-            char name[128]; copy_utf8(name, sizeof(name), file_item_name(&s_files[index]));
+            char name[128], author[128]; file_display_name(&s_files[index],name,author);
             while (*name && ttf_text_width_px(ui_text_effective_px(23), name) > 450) {
                 size_t n = strlen(name) - 1;
                 while (n && ((unsigned char)name[n] & 0xc0) == 0x80) --n;
@@ -635,7 +643,10 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             }
             file_icon(fb, 48, y + 20, s_files[index].is_dir);
             ui_text(fb, 101, y + 11, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            char detail[32]; file_detail(detail, sizeof(detail), &s_files[index]);
+            char detail[192], size[32]; file_detail(size, sizeof(size), &s_files[index]);
+            if(author[0])snprintf(detail,sizeof(detail),"%s · %s",author,size);
+            else copy_utf8(detail,sizeof(detail),size);
+            fit_name(detail,19,450);
             ui_text(fb, 101, y + 49, 19, detail, EPD_DRAW_ALIGN_LEFT, false);
             const char *tag = !strcmp(s_files[index].path, app_settings_books_dir()) ? "书籍目录" :
                               !strcmp(s_files[index].path, app_settings_fonts_dir()) ? "字体目录" : NULL;
@@ -707,13 +718,16 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             if (index >= s_count) break;
             int y = 520 + row * 91;
             if (row) file_rule(fb, 96, y, 532);
-            char name[128]; copy_utf8(name, sizeof(name), file_item_name(&s_files[index])); fit_name(name, 23, 430);
+            char name[128], author[128]; file_display_name(&s_files[index],name,author); fit_name(name, 23, 430);
             file_icon(fb, 52, y + 24, s_files[index].is_dir);
             if (s_files[index].is_dir)
                 ui_text_vc(fb, 101, y + 46, 23, name, EPD_DRAW_ALIGN_LEFT, false);
             else
                 ui_text(fb, 101, y + 20, 23, name, EPD_DRAW_ALIGN_LEFT, false);
-            char detail[32]; file_detail(detail, sizeof(detail), &s_files[index]);
+            char detail[192], size[32]; file_detail(size, sizeof(size), &s_files[index]);
+            if(author[0])snprintf(detail,sizeof(detail),"%s · %s",author,size);
+            else copy_utf8(detail,sizeof(detail),size);
+            fit_name(detail,19,450);
             if (s_files[index].is_dir) ui_text_vc(fb, 628, y + 46, 24, "›", EPD_DRAW_ALIGN_RIGHT, false);
             else {
                 ui_text(fb, 101, y + 55, 19, detail, EPD_DRAW_ALIGN_LEFT, false);

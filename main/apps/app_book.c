@@ -5343,13 +5343,12 @@ static void scan_shelf_dir(app_ctx_t *ctx, const char *root, bool is_flash, nvs_
         // Books the user removed stay off the shelf; the file stays on the card and reading it
         // again puts it back.
         if (hidden && shelf_hidden_read_handle(hidden, path)) continue;
-        if (strlen(ent->d_name) >= sizeof(((shelf_entry_t *)0)->name) ||
-            st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) { *skipped = true; continue; }
+        if (st.st_size < 0 || (uint64_t)st.st_size > UINT32_MAX) { *skipped = true; continue; }
         if (!shelf_reserve()) { *truncated = true; break; }
         shelf_entry_t candidate = {0};
         shelf_entry_t *item = &candidate;
         copy_text(item->path, sizeof(item->path), path);
-        if (!book_title_from_path(item->path, item->name, sizeof(item->name)))
+        if (!book_name_from_path(item->path, item->name, sizeof(item->name),item->author,sizeof(item->author)))
             clean_filename(item->name, sizeof(item->name), ent->d_name);
         if (!strcasecmp(ext, ".epub")) {
             char title[sizeof(item->name)] = {0};
@@ -5357,8 +5356,11 @@ static void scan_shelf_dir(app_ctx_t *ctx, const char *root, bool is_flash, nvs_
             // Listing must stay cheap and bounded: never parse every EPUB before
             // the shelf is first painted. Opening a book populates this cache.
             // 首屏列书只读已有元数据缓存，不在封面出现前逐本解析 EPUB。
-            if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
-                copy_text(item->author, sizeof(item->author), author);
+            if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK && author[0]) {
+                bool chinese=book_author_clean_display(author,sizeof(author));
+                if(author[0]&&(chinese||!book_author_clean_display(item->author,sizeof(item->author))))
+                    copy_text(item->author,sizeof(item->author),author);
+            }
         }
         item->search_match = read_pico_search_match(item->name, s_query);
         item->size = st.st_size;
@@ -5402,20 +5404,22 @@ static bool shelf_backfill_visit(const char* path, const book_progress_t* progre
     if (scan->hidden && shelf_hidden_read_handle(scan->hidden, path)) return true;
     const char* base = strrchr(path, '/');
     base = base ? base + 1 : path;
-    if (strlen(base) >= sizeof(((shelf_entry_t*)0)->name)) return true;
     if (!shelf_reserve()) { scan->truncated = true; return false; }
     shelf_entry_t candidate = {0};
     shelf_entry_t* item = &candidate;
     copy_text(item->path, sizeof(item->path), path);
-    if (!book_title_from_path(item->path, item->name, sizeof(item->name)))
+    if (!book_name_from_path(item->path, item->name, sizeof(item->name),item->author,sizeof(item->author)))
         clean_filename(item->name, sizeof(item->name), base);
     if (!item->name[0]) return true;
     const char* ext = strrchr(base, '.');
     if (ext && !strcasecmp(ext, ".epub") && pico_boot_asset_allowed(item->path)) {
         char title[sizeof(item->name)] = {0};
         char author[sizeof(item->author)] = {0};
-        if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK)
-            copy_text(item->author, sizeof(item->author), author);
+        if (book_epub_metadata_cached(item->path, title, sizeof(title), author, sizeof(author)) == ESP_OK && author[0]) {
+            bool chinese=book_author_clean_display(author,sizeof(author));
+            if(author[0]&&(chinese||!book_author_clean_display(item->author,sizeof(item->author))))
+                copy_text(item->author,sizeof(item->author),author);
+        }
     }
     item->size = (uint32_t)st.st_size;
     // 内置书根固定在 /flash 下，与 book_store.c 和 open_book 的前缀判断一致。
