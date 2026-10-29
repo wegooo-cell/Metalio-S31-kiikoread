@@ -2,6 +2,9 @@
 
 ## 未发布 / Unreleased
 
+- S31普通/图文阅读沿用Moku的GL37加六相白，进度同轮输出；速读保留独立黑白DU，并在原定稿前追加四相白。GL37不可用时保持灰阶回退、等黑/灰保护与末尾定稿，手动/周期GC48不变。
+  S31 ordinary/image turns retain Moku GL37 plus six whites and fused progress; FastBW independently retains DU with four added whites before its original settling. Preserve gray fallback/equal black-gray holds/settling without GL37 and retain manual/periodic GC48.
+
 - 两机同步：兼容部分 EPUB 制作工具写入的本地头全零 ZIP64 预留字段，修复小书被误报为资源超限；保留32位尺寸、范围和CRC校验，真正的ZIP64仍不支持。
   Both boards: accept a narrowly validated zero-filled local ZIP64 placeholder without admitting real ZIP64 archives; retain size, range and CRC checks.
 

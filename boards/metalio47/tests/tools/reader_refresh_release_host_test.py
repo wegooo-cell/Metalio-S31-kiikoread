@@ -29,7 +29,8 @@ enum {MODE_DU,MODE_GL16,MODE_GC16,APP_PAGE_REFRESH_MODE=MODE_GL16};
 #define portMAX_DELAY 0
 #define E0470_TURN_FAST_TICK_US 11090
 static int E0470_WAVEFORM,E0470_FULL_WAVEFORM,E0470_FOLLOW_WAVEFORM;
-static const int *display_reader_text_waveform(void){return &E0470_WAVEFORM;}
+static int soft_waveform;
+static const int *display_reader_soft_turn_waveform(void){return &soft_waveform;}
 static struct{bool valid;}s_reader_panel_frame;
 static int s_online_fonts;
 static bool ui_online_fonts_present(int *fonts,app_ctx_t *ctx,app_redraw_t redraw){(void)fonts;(void)ctx;(void)redraw;assert(false);return false;}
@@ -46,6 +47,7 @@ static EpdRect s_area={0,0,684,1216},s_du_area;
 static void reader_prefetch_end(bool started){assert(!started);}
 static int calls,selected,fail,rendered,prepares,images,tick;static unsigned s_turns;
 static bool background,immersive;
+static int app_settings_reader_turn_effect(void){return tick;}
 static bool app_settings_reader_immersive(void){return immersive;}
 static EpdRect last_water_area;
 static EpdRect last_gray_area;
@@ -81,7 +83,6 @@ static void e0470_page_turn_set_tick_us(int t){assert(t==11090);}
 #define update_display_full(...) push(12)
 static enum EpdDrawError update_display_area_diff_with(void *h,const int *w,int m,EpdRect a){return push_gray(h,w,m,a,13);}
 static enum EpdDrawError update_display_area_full_with(void *h,const int *w,int m,EpdRect a){return push_gray(h,w,m,a,14);}
-static enum EpdDrawError update_display_gray_transition(void *h,EpdRect a){return push_gray(h,&E0470_FULL_WAVEFORM,MODE_GL16,a,22);}
 #define update_display_area_with(...) push(15)
 #define update_display_with(...) push(16)
 #define update_display_mode_diff(...) push(17)
@@ -120,9 +121,17 @@ int main(void){
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_reader_footer_pending=!full;
   assert(present(&ctx,APP_REDRAW_AREA));
-  assert(calls==1&&selected==20&&s_reader_text_frame);
+  assert(calls==1&&selected==13&&last_gray_wave==&soft_waveform&&s_reader_text_frame);
   assert(!s_reader_footer_pending&&!s_reader_cleanup);
  }
+ // 速读必须进入独立DU出口；普通/图像不能误用该路径。/ FastBW must reach its separate DU outlet; ordinary/images must not.
+ for(int full=0;full<2;++full)for(int hidden=0;hidden<2;++hidden){
+  reset();tick=2;s_reader_fullscreen=full;immersive=hidden;s_reader_footer_pending=!full;
+  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==20&&s_reader_text_frame);
+ }
+ reset();tick=2;s_reader_cleanup=true;present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==14);
+ reset();tick=2;present(&ctx,APP_REDRAW_FULL);assert(calls==1&&selected==12);
+ reset();tick=2;fail=1;present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==20&&!s_reader_text_frame);
  for(int full=0;full<2;++full){
   reset();s_reader_fullscreen=full;s_reader_cleanup=true;
   assert(present(&ctx,APP_REDRAW_AREA));assert(calls==1&&selected==14&&s_reader_text_frame);
@@ -137,7 +146,7 @@ int main(void){
  reset();s_reader_panel=READER_PANEL_FONT_SETTINGS;s_reader_turn_pending=s_reader_footer_pending=false;test_panel_short=true;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==21&&rendered==0); // local UI: no footer replay
  reset();fail=1;s_reader_footer_pending=false;
- present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==20&&!s_reader_text_frame);
+ present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_reader_text_frame);
  reset();s_water_turn_pending=true;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(selected==18&&calls==1&&!s_water_turn_pending);
  for(int full=0;full<2;++full){
@@ -149,14 +158,14 @@ int main(void){
  s_area=(EpdRect){0,0,684,1216};
  reset();fail=1;s_water_turn_pending=true;
  present(&ctx,APP_REDRAW_AREA);assert(selected==18&&calls==1&&!s_reader_text_frame);
- // Ordinary/ripple/FastBW keep all image tones; entering/changing/leaving images fuse progress in one platform gray transition.
+ // 图像始终保留灰阶，进度同轮输出。/ Images retain gray targets with progress fused in one output.
  for(int effect=0;effect<3;++effect)for(int full=0;full<2;++full)for(int hide_status=0;hide_status<2;++hide_status)for(int kind=0;kind<3;++kind){
   reset();tick=effect;immersive=hide_status;s_reader_fullscreen=full;s_reader_footer_pending=!full;s_reader_turn_pending=false;
   images=kind!=2;s_reader_image_refresh_pending=images!=0;s_reader_image_exit_pending=kind!=0;
   present(&ctx,APP_REDRAW_AREA);
-  assert(calls==1&&selected==22);
-  assert(last_gray_area.x==0&&last_gray_area.width==684&&last_gray_area.y==(full?(hide_status?0:80):160));
-  assert(last_gray_area.y+last_gray_area.height==(full?1216:1192));
+  assert(calls==1&&selected==13&&last_gray_wave==&soft_waveform);
+  assert(last_gray_area.x==0&&last_gray_area.width==684&&last_gray_area.y==0);
+  assert(last_gray_area.height==1216);
   assert(s_reader_image_frame==(images!=0)&&s_reader_text_frame==!images&&!s_reader_image_exit_pending);
  }
  // Manual/periodic cleanup takes priority even on image-bearing pages, and never uses a sparse GC mask.
@@ -167,11 +176,11 @@ int main(void){
   if(!kind)assert(last_gray_mode==MODE_GC16&&last_gray_wave==&E0470_FULL_WAVEFORM&&last_gray_area.y==0&&last_gray_area.height==1216);
  }
  reset();images=1;s_reader_image_refresh_pending=true;s_reader_turn_pending=false;
- present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==22&&last_gray_area.y==0&&last_gray_area.height==1216);
+ present(&ctx,APP_REDRAW_PAGE);assert(calls==1&&selected==13&&last_gray_wave==&soft_waveform&&last_gray_area.y==0&&last_gray_area.height==1216);
  // A failed image/exit output cannot become either displayed-image history or a text-only fast baseline.
  for(int exit=0;exit<2;++exit){
   reset();fail=1;images=!exit;s_reader_image_refresh_pending=!exit;s_reader_image_exit_pending=exit;
-  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==22&&!s_reader_image_frame&&!s_reader_text_frame);
+  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&!s_reader_image_frame&&!s_reader_text_frame);
  }
  reset();images=1;hide_images=true;s_reader_turn_pending=false;s_reader_fullscreen=false;s_reader_footer_pending=false;
  present(&ctx,APP_REDRAW_AREA);assert(!s_reader_image_frame);
@@ -181,7 +190,7 @@ int main(void){
  s_reader_clock_painted_minute=321;
  present(&ctx,APP_REDRAW_AREA);assert(calls==1&&selected==13&&s_reader_clock_minute==321&&!s_reader_clock_pending);
  reset();ctx.request_app=true;present(&ctx,APP_REDRAW_AREA);assert(calls==0);ctx.request_app=false;
- puts("PASS: S31 text/ripple and single platform image/exit outputs with fused progress; full GC48 cleanup priority, failed-frame history, panels, clock and cancellation guards");
+ puts("PASS: S31 ordinary soft / FastBW DU / ripple and fused image/exit outputs with fused progress; full GC48 cleanup priority, failed-frame history, panels, clock and cancellation guards");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='kiikoread-reader-release-') as folder:

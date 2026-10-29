@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include "display_reader_waveform.h"
 #include "e0470_epaper_waveform.h"
+// 默认表测试隔离可选GL37分配，真实GL37由专项测试覆盖。/ Isolate optional GL37 allocation here; dedicated tests cover the real profile.
+const EpdWaveform* display_reader_panel37_waveform(void){return NULL;}
 int epd_width(void){return 1216;}
 int epd_height(void){return 684;}
 enum EpdRotation epd_get_rotation(void){return EPD_ROT_INVERTED_PORTRAIT;}

@@ -106,7 +106,7 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           extra=()
-          if [ "${{ matrix.board }}" = metalio47 ]; then extra=(--s31-pie --s31-text-ripple); fi
+          if [ "${{ matrix.board }}" = metalio47 ]; then extra=(--s31-pie --s31-text-ripple --s31-reader-panel37); fi
           python tools/build_firmware.py --board "${{ matrix.board }}" \
             --idf-${{ matrix.board }} "$IDF_PATH" --python "$(command -v python)" \
             --output build/boards "${extra[@]}"
@@ -134,6 +134,10 @@ jobs:
       - name: Materialize and test reader/UI/settings for this board
         shell: bash
         run: |
+          if [ "${{ matrix.board }}" = metalio47 ]; then
+            python3 tools/metalio_reader_soft_turn_host_test.py
+            python3 tools/metalio_text_batch_host_test.py
+          fi
           python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/host/${{ matrix.board }}
           cd build/host/${{ matrix.board }}
           mkdir -p build/book-tests/settings-card
