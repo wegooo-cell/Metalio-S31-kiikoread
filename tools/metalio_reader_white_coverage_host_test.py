@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""中文：真实S31差分、高层和Moku43相联合验证均匀白底；旧掩码作为反例。
-English: Combine actual S31 differences/high-level output/Moku43 phases; retain old dirty masks as a negative control.
+"""中文：真实S31差分、高层和full55相联合验证均匀白底；旧掩码作为反例。
+English: Combine actual S31 differences/high-level output/full55 phases; retain old dirty masks as a negative control.
 """
 from pathlib import Path
 import subprocess,tempfile,sys
@@ -53,10 +53,12 @@ enum EpdDrawError epd_draw_base(EpdRect area,const uint8_t *pixels,EpdRect crop,
  assert(mode==(MODE_PACKING_1PPB_DIFFERENCE|MODE_GL16)&&temperature==25&&pixels==difference);
  assert(wave==display_reader_soft_turn_waveform()&&rows==lines&&cols==columns);
  assert(!memcmp(back,saved,BYTES));++draws;missed_white=0;
- const EpdWaveformPhases *ph=e0470_waveform_phases(wave,MODE_GL16);assert(ph&&ph->phases==43);
+ const EpdWaveformPhases *ph=e0470_waveform_phases(wave,MODE_GL16);assert(ph&&ph->phases==55);
  int same_white=0;
- for(int f=0;f<43;++f)same_white+=e0470_phase_action(ph,f,15,15)==2;
- assert(same_white==6);
+ for(int f=0;f<55;++f)same_white+=e0470_phase_action(ph,f,15,15)==2;
+  const EpdWaveformPhases *raw=e0470_waveform_phases(&E0470_FULL_WAVEFORM,MODE_GL16);assert(raw);
+ int base_white=0;for(int f=0;f<raw->phases;++f)base_white+=e0470_phase_action(raw,f,15,15)==2;
+ assert(same_white==base_white+4);
  for(int y=0;y<H;++y)for(int x=0;x<W;++x){
   bool enabled=rows[y]&&((cols[x/2]>>(4*(x&1)))&15);
   unsigned to=nibble(front,x,y),from=nibble(saved,x,y);
@@ -64,8 +66,12 @@ enum EpdDrawError epd_draw_base(EpdRect area,const uint8_t *pixels,EpdRect crop,
   if(to==15&&!enabled)++missed_white;
   if(enabled)assert(difference[(size_t)y*W+x]==(to<<4|from));
  }
- // 等黑/等灰始终保持；扩大掩码不引入新的黑/灰脉冲。/ Equal black/grays still hold; wider masks introduce no new black/gray pulses.
- for(int v=0;v<15;++v)for(int f=0;f<43;++f)assert(!e0470_phase_action(ph,f,v,v));
+ // 原厂等灰及等黑压黑保留，只有等黑擦白被抑制。/ Retain native equal-gray/black-darken actions and suppress only equal-black erase.
+ for(int v=0;v<15;++v)for(int f=0;f<55;++f){
+  int want=f<raw->phases?e0470_phase_action(raw,f,v,v):0;
+  if(v==0&&want==2)want=0;
+  assert(e0470_phase_action(ph,f,v,v)==want);
+ }
  return fail_draw?EPD_DRAW_OTHER_ERROR:EPD_DRAW_SUCCESS;
 }
 '''
@@ -94,7 +100,7 @@ int main(void){
  assert(reader_soft_present(&ctx,full)==EPD_DRAW_OTHER_ERROR&&draws==1&&!missed_white&&!memcmp(back,saved,BYTES));
  reset();expect_full=false;
  assert(reader_soft_present(&ctx,(EpdRect){0,191,H,800})==EPD_DRAW_SUCCESS&&draws==1&&missed_white);
- puts("PASS: real S31 difference/highlevel/Moku43: legacy dirty-mask negative control, uniform full-page6-white coverage, equal black/gray held, one output, unchanged43 phases, image-profile reuse/partial exclusion and failed-scan history");
+ puts("PASS: real S31 difference/highlevel/full55: legacy dirty-mask negative control, uniform full-page4-extra-white coverage, native gray/black-darken actions, one55-phase output, image-profile reuse/partial exclusion and failed-scan history");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s31-reader-white-') as tmp:

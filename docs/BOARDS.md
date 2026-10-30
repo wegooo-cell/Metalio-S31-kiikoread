@@ -373,10 +373,11 @@ English: Explicit local `--pico-main-clean` remains OFF by default and scoped to
 
 ## S31阅读差分更新（2026-10-29） / S31 reader differences
 
-本次S31产品构建显式启用`--s31-reader-panel37`，CI同样覆盖该档。普通文字、图文及离图页原样采用Moku PR6的GL37加六相目标白，共43相、16级灰阶；六相包含原本已白的区域，黑/灰等值不重驱。水波纹继续原独立出口；手动及周期清理保留GC48。GL37关闭或分配失败时，完整GL48保留全部非等值迁移，追加六相目标白和三相保持，共57相，避免回到重驱等黑/灰的原表。
+S31普通文字、图文及离图页统一使用完整GL48，等黑仅去掉擦白并保留原压黑，灰阶沿用原厂；末尾增加四相目标白（包含等白）与三相释放，共55相。普通翻页不再借用控件GL37缓存，开关关闭或PSRAM不足时仍为相同有界静态派生序列。`--s31-reader-panel37`继续控制独立面板路径；水波纹、速读、手动/周期GC48保持各自出口。硬件上电确认按键后单/双击设置均可直接恢复，无密码时已确认深睡单击沿用本次唤醒，有密码仍认证。
 
 速读黑白独立量化目标，使用本板所选DU完整相序再加四相目标白；原表有尾部保持时将四相插在其前。默认DU20共24相，带DU14实验的本地构建共18相；不改首页DU14白底维护、原表数据、VCOM、供电或扫描时钟。实际光学速度、白底闪动和残影需实屏比较；相数并非总响应时间。
 
-S31 builds and CI explicitly enable `--s31-reader-panel37`. Ordinary text/image/exits retain Moku PR6's exact GL37 plus six white-target phases:43 phases,16 grays,including equal whites while equal black/grays hold. Ripple keeps its own outlet and manual/periodic cleanup keeps GC48. With GL37 disabled or allocation failure, retain every changed GL48 transition plus six whites and three release holds,57 phases,without re-driving equal black/grays.
+S31 ordinary text/image/exits use full GL48, suppress only equal-black erase while retaining native darken/gray actions, and add four all-white-target phases plus three release holds:55 phases. Ordinary output uses a bounded static derivative independent of panel37 allocation/options; panel37 still controls separate panel paths. Ripple/FastBW/manual/periodicGC48 keep their own outlets. Confirmed hardware key boots resume for either click setting; confirmed single deep wakes reuse their key, and PIN authentication remains required.
 
 FastBW independently quantizes targets and retains the selected native DU sequence plus four white-target phases,inserted before existing trailing holds. NativeDU20 totals24; a local DU14 experiment totals18. Root DU14 maintenance,vendor tables,VCOM,power and clocks stay separate. Optical timing/flash/ghosting still require hardware comparison; phase count is not total latency.
+

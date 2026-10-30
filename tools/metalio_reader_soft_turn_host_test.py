@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""核对Moku普通原字节、GL48/OOM回退及独立DU加四白；不连接设备。
-Check unchanged Moku ordinary bytes, GL48/OOM fallback and separate DU plus four whites; no device access.
+"""核对完整GL48普通时序、无分配/OOM一致性及独立DU加四白；不连接设备。
+Check full GL48 ordinary bytes, allocation/OOM invariance and separate DU plus four whites; no device access.
 """
 from pathlib import Path
 import hashlib
@@ -11,9 +11,6 @@ import tempfile
 from board_source_view import materialize
 
 ROOT = Path(__file__).resolve().parents[1]
-# PR6 3ea8115 的真实GL37+6输出；保留贡献者普通方案，不将光学效果视为已验证。
-# Actual GL37+6 output from PR6 3ea8115; preserve its ordinary profile without claiming optical validation.
-MOKU_GL37_WHITE6_SHA256 = 'b1380d6ebe9496455a85338c4396011f6f8b242a765d6c1ee457b540056cb39e'
 UNIT = r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -44,21 +41,22 @@ int main(int argc,char **argv){
  unsigned char saved[48*64];assert(raw&&raw->phases==48);memcpy(saved,raw->luts,sizeof(saved));
  const EpdWaveform *normal=display_reader_soft_turn_waveform();
  const EpdWaveformPhases *n=e0470_waveform_phases(normal,MODE_GL16);
- bool panel=KIIKO_S31_READER_PANEL37&&!oom;
- assert(normal!=&E0470_WAVEFORM&&n&&n->phases==(panel?43:57));
+ assert(normal!=&E0470_WAVEFORM&&n&&n->phases==55);
  assert(display_reader_soft_turn_waveform()==normal);
- const EpdWaveformPhases *base=panel?e0470_waveform_phases(display_reader_panel37_waveform(),MODE_GL16):raw;
- int hold=trailing_holds(base);if(hold>4)hold=4;
- int drive=base->phases-hold;
+ const EpdWaveformPhases *base=raw;
+ int hold=trailing_holds(base),drive=base->phases-hold;
  for(int to=0;to<16;++to)for(int from=0;from<16;++from){
-  for(int f=0;f<drive;++f)assert(e0470_phase_action(n,f,to,from)==(to==from?0:e0470_phase_action(base,f,to,from)));
-  for(int f=drive;f<drive+6;++f)assert(e0470_phase_action(n,f,to,from)==(to==15?2:0));
-  for(int f=drive+6;f<n->phases;++f)assert(e0470_phase_action(n,f,to,from)==0);
+  for(int f=0;f<drive;++f){int expected=e0470_phase_action(base,f,to,from);
+   if(to==0&&from==0&&expected==2)expected=0;
+   assert(e0470_phase_action(n,f,to,from)==expected);
+  }
+  for(int f=drive;f<drive+4;++f)assert(e0470_phase_action(n,f,to,from)==(to==15?2:0));
+  for(int f=drive+4;f<n->phases;++f)assert(e0470_phase_action(n,f,to,from)==0);
  }
  assert(trailing_holds(n)>=3&&!n->phase_times);
- if(panel){FILE *f=fopen(argv[2],"wb");assert(f&&fwrite(n->luts,64,n->phases,f)==43&&fclose(f)==0);}
+ FILE *dump=fopen(argv[2],"wb");assert(dump&&fwrite(n->luts,64,n->phases,dump)==55&&fclose(dump)==0);
  assert(!memcmp(saved,raw->luts,sizeof(saved)));
- assert(allocations==(KIIKO_S31_READER_PANEL37?1:0));
+ assert(allocations==0);
  const EpdWaveform *binary=&E0470_FULL_WAVEFORM;
 #if KIIKO_S31_DU14
  binary=display_du14_white_waveform();
@@ -104,5 +102,6 @@ with tempfile.TemporaryDirectory(prefix='s31-reader-profiles-') as temporary:
             for oom in (0, 1):
                 dump = folder / 'normal.lut'
                 subprocess.run([str(exe), str(oom), str(dump)], check=True)
-                if panel37 and not oom:
-                    assert hashlib.sha256(dump.read_bytes()).hexdigest() == MOKU_GL37_WHITE6_SHA256
+                digest=hashlib.sha256(dump.read_bytes()).hexdigest()
+                if 'normal_digest' not in globals(): normal_digest=digest
+                assert digest==normal_digest, 'panel/OOM options must retain exact ordinary bytes'

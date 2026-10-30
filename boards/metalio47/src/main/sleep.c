@@ -958,6 +958,9 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
             // directly and skips the single/double-click gate; other resets keep the gate and PIN
             // verification is unaffected.
             if(!s_boot_power_on || !metalio_boot_power_key()) {
+                // 深睡的已确认单击沿用本次唤醒，不要求用户再按一次。/ Consume the confirmed single deep-wake key without requiring another press.
+                if(s_boot_power_wake && metalio_boot_power_key() && app_settings_wake_presses()==1)
+                    read_pico_pmu_latch_power_wakeup();
                 lock_wait_for_unlock(NULL);
             }
         }

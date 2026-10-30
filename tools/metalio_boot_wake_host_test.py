@@ -91,6 +91,7 @@ static void reset(void){
 static void gate(void){EpdiyHighlevelState hl={0};app_lock_capture_boot_wakeup();app_lock_boot_gate(&hl,(void*)1,(void*)2);assert(!hints&&frames==1);}
 int main(void){
  reset();physical=true;gate();assert(!waits&&!manual_presses&&ready==1&&holds==1);
+ reset();wake_presses=2;physical=true;gate();assert(!waits&&!manual_presses&&ready==1&&holds==1);
  reset();reset_reason=ESP_RST_DEEPSLEEP;cause=ESP_SLEEP_WAKEUP_EXT1;ext1=4;physical=true;
  gate();assert(waits==1&&latches==1&&!manual_presses);
  reset();gate();assert(waits==1&&manual_presses==1&&!latches);
