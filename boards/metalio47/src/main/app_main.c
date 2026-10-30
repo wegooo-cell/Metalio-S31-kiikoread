@@ -189,8 +189,11 @@ void app_main(void) {
     const bool resuming = pico_boot_has_resume() && reset == ESP_RST_DEEPSLEEP;
     // 双击门禁始终显示锁图，不能在“准备资源”页暗中等按键。
     // A double-press gate retains lock art rather than waiting behind the resource splash.
+    // 长按开机的硬件上电直接进应用，不先停在锁图等短按；其他复位仍保留门禁。
+    // A confirmed long-press hardware boot goes straight to the app instead of stopping on the
+    // lock art; other resets keep the gate.
     const bool retain_lock = (pico_boot_has_resume() || pico_boot_lock_pending()) &&
-        (reset != ESP_RST_POWERON || !metalio_boot_power_key() || app_settings_wake_presses() == 2);
+        (reset != ESP_RST_POWERON || !metalio_boot_power_key());
     (void)prepare_startup_frame(&hl,framebuffer,retain_lock,vcom_ok);
     rp_boot_mark("splash");
     // 直接续读不先加载整份系统字体；密码验证仍先使用所选系统字体。

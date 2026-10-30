@@ -174,7 +174,7 @@ const EpdWaveform* display_reader_panel_gray4_waveform(bool erase_underlay) {
  * Ordinary retains Moku's GL37 plus six white-target phases including equal whites, before its original holds.
  * GL48 without trailing holds adds three release phases; equal black/grays still hold instead of falling back to the re-driving raw table.
  */
-#define READER_SOFT_TURN_EXTRA 6
+#define READER_SOFT_TURN_EXTRA 4
 static uint8_t s_soft_turn[E0470_FULL_GL16_FRAMES + READER_SOFT_TURN_EXTRA + 3][16][4];
 static EpdWaveformPhases s_soft_turn_phases;
 static const EpdWaveformPhases* s_soft_turn_ranges[1];
@@ -191,8 +191,6 @@ static void soft_turn_set(int phase,int to,int from,int action){
 
 const EpdWaveform* display_reader_soft_turn_waveform(void){
     if(s_soft_turn_ready)return &s_soft_turn_waveform;
-    // 优先用 GL37 面板表（16 级、37 相）；不可用时回退完整 GL48。
-    // Prefer the GL37 panel table (16 levels, 37 phases); fall back to full GL48.
     const EpdWaveform *base=&E0470_WAVEFORM;
     const EpdWaveform *panel37=display_reader_panel37_waveform();
     if(panel37)base=panel37;
@@ -209,21 +207,20 @@ const EpdWaveform* display_reader_soft_turn_waveform(void){
         if(nonzero)break;
         ++hold;
     }
-    if(hold>4)hold=4;
+    if(hold<1)return &E0470_WAVEFORM;
     const int drive=gl->phases-hold;
-    const int settle=hold?hold:3;
+    // 官方全像素时序 + 等黑去掉擦白 + “变成白/本来白”末尾补四相擦白（插在定稿保持前）。
+    // Official full-pixel timing, equal black drops its erase phases, and four extra white
+    // phases (for every white target, blanks included) are inserted before the settle holds.
     memcpy(s_soft_turn,gl->luts,(size_t)drive*16*4);
     memcpy(s_soft_turn+drive+READER_SOFT_TURN_EXTRA,(const uint8_t*)gl->luts+(size_t)drive*16*4,
            (size_t)hold*16*4);
-    for(int f=0;f<drive;++f)for(int v=0;v<16;++v)soft_turn_set(f,v,v,0);
+    for(int f=0;f<drive;++f)
+        if(e0470_phase_action(gl,f,0,0)==2)soft_turn_set(f,0,0,0);
     for(int i=0;i<READER_SOFT_TURN_EXTRA;++i)
-        for(int to=0;to<16;++to)
-            for(int from=0;from<16;++from)
-                // 所有目标为白的像素都推白（含本来也白的空白区），配合差分清理上一页灰底。
-                // Whiten every pixel whose target is white, including blanks that were already
-                // white, so the previous page's gray floor clears in the same difference pass.
-                soft_turn_set(drive+i,to,from,to==15?2:0);
-    s_soft_turn_phases=(EpdWaveformPhases){drive+READER_SOFT_TURN_EXTRA+settle,
+        for(int from=0;from<16;++from)
+            soft_turn_set(drive+i,15,from,2);
+    s_soft_turn_phases=(EpdWaveformPhases){gl->phases+READER_SOFT_TURN_EXTRA,
                                            (const uint8_t*)s_soft_turn,NULL};
     s_soft_turn_ranges[0]=&s_soft_turn_phases;
     s_soft_turn_mode=(EpdWaveformMode){MODE_GL16,1,s_soft_turn_ranges};
