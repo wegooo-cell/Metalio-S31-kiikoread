@@ -952,9 +952,13 @@ void app_lock_boot_gate(EpdiyHighlevelState *hl, cst836u_handle_t touch, sc7a20h
     if (!lock_pin_enabled()) {
         if(pico_boot_has_resume() || pico_boot_lock_pending()) {
             pico_boot_ready();pico_boot_hold_resume();
-            // 单击硬件开机直接恢复；其他复位保持门禁，深睡只补记实际采样的按键。
-            // Single-press hardware boots restore directly; other resets retain the gate and deep wakes require sampled power evidence.
-            if(!s_boot_power_on || !metalio_boot_power_key() || app_settings_wake_presses()==2) {
+            // 硬件上电且开机时确实采样到电源键按下（长按开机）就直接恢复，不再走单击/双击短按门禁；
+            // 其他复位（软件复位、未确认的深睡唤醒）仍保留解锁门禁，密码验证不受影响。
+            // A hardware power-on with a confirmed power-key press at boot (long-press boot) restores
+            // directly and skips the single/double-click gate; other resets keep the gate and PIN
+            // verification is unaffected.
+            if(!s_boot_power_on || !metalio_boot_power_key()) {
+                // 深睡的已确认单击沿用本次唤醒，不要求用户再按一次。/ Consume the confirmed single deep-wake key without requiring another press.
                 if(s_boot_power_wake && metalio_boot_power_key() && app_settings_wake_presses()==1)
                     read_pico_pmu_latch_power_wakeup();
                 lock_wait_for_unlock(NULL);

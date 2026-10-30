@@ -15,8 +15,8 @@ const EpdWaveform* display_reader_water_waveform(void);
 /// Pico速读保留原厂DU；S31保留所选DU原序，定稿前追加四相目标白，使用批量模式别名。
 /// Pico FastBW retains native DU; S31 retains the selected DU order, inserts four white-target phases before settling and aliases the batch mode.
 const EpdWaveform* display_reader_fast_text_waveform(void);
-/// 两板普通翻页分别派生本板波形：Pico等灰保持、变白补四相；S31沿Moku GL37补六相目标白。
-/// Ordinary uses board-native profiles: Pico holds equal grays and adds four changed-white phases; S31 retains Moku GL37 plus six white-target phases.
+/// 两板普通翻页分别派生本板波形：Pico等灰保持、变白补四相；S31完整GL48去等黑擦白，补四相目标白及释放。
+/// Ordinary uses board-native profiles: Pico holds equal grays and adds four changed-white phases; S31 fullGL48 suppresses equal-black erase and adds four whites plus release.
 const EpdWaveform* display_reader_soft_turn_waveform(void);
 /// 只归一文字区域目标，保留真实back和区域外灰阶。/ Normalize only the text target, retaining real history and outside grays.
 bool display_reader_fast_text_prepare(EpdiyHighlevelState* hl,EpdRect area);
